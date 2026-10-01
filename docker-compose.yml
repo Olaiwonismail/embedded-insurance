@@ -1,0 +1,10 @@
+services:
+  api:
+    build: 
+      context: server
+      dockerfile: Dockerfile
+    environment:
+      - PORT : 3000
+    volumes:
+      - ./server:/app
+
