@@ -1,23 +1,21 @@
-import express, {Request , response, Response } from 'express'
+import express, { Request, Response } from 'express';
 import 'dotenv/config';
-import { drizzle } from 'drizzle-orm/node-postgres';
 
-const db = drizzle(process.env.DATABASE_URL!);
+import healthRoutes from './routes/health';
+import usersRoutes from './routes/users';
+const port = process.env.PORT 
+const app = express();
 
 
-const app = express()
+app.use(express.json());
 
-const port = 3000
-app.use(express.json())
+app.get('/', (_req: Request, res: Response) => {
+  res.send('Hello, World!');
+});
 
-app.get('/',( req : Request , res : Response) => {
-    res.send('Hello, World!')
-})
-
-app.get('/health',( req : Request , res : Response) => {
-    res.json({ message: 'Healthy' });
-})
+app.use('/health', healthRoutes);
+app.use('/users', usersRoutes);
 
 app.listen(port, () => {
-    console.log(`Server is running on http://localhost:${port}`)
-})
+  console.log(`Server is running on http://localhost:${port}`);
+});
