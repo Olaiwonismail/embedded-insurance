@@ -1,20 +1,20 @@
-import express, { Request, Response } from 'express';
 import 'dotenv/config';
 
-import healthRoutes from './routes/health';
-import usersRoutes from './routes/users';
-const port = process.env.PORT 
-const app = express();
+import { assertConfig } from './config';
+import { createApp } from './app';
+import { createDb } from './db';
 
 
-app.use(express.json());
+// Refuse to start without a valid ENCRYPTION_KEY and DEFAULT_COMMISSION_RATE.
+try {
+  assertConfig();
+} catch (err) {
+  console.error(`Refusing to start: ${(err as Error).message}`);
+  process.exit(1);
+}
 
-app.get('/', (_req: Request, res: Response) => {
-  res.send('Hello, World!');
-});
-
-app.use('/health', healthRoutes);
-app.use('/users', usersRoutes);
+const port = process.env.PORT;
+const app = createApp(createDb(process.env.DATABASE_URL!));
 
 app.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);

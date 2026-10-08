@@ -43,7 +43,7 @@ export const insurancePlansTable = pgTable("insurance_plans", {
 export const storesTable = pgTable("stores", {
   id: integer().primaryKey().generatedAlwaysAsIdentity(),
   name: varchar({ length: 255 }).notNull(),
-  status: varchar({ length: 255 }).notNull(),
+  status: varchar({ length: 255 }).notNull().default("pending"),
 
   platform: varchar({ length: 50 }).notNull(),
   publicKey: varchar({ length: 255 }).notNull().unique(),
