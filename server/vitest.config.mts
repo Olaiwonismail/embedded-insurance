@@ -4,6 +4,8 @@ export default defineConfig({
   test: {
     include: ['test/**/*.test.ts'],
     globalSetup: ['test/global-setup.ts'],
+    // Test files share one database and truncate the same tables, so run them one at a time.
+    fileParallelism: false,
     env: {
       // Test-only values; never use these outside tests.
       ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
