@@ -6,6 +6,8 @@ import usersRoutes from './routes/users';
 import { createOnboardingRouter } from './routes/onboarding';
 import { createAdminStoresRouter } from './routes/adminStores';
 import { createMerchantRouter } from './routes/merchant';
+import { createQuotesRouter } from './routes/quotes';
+import { createWidgetAuth } from './middleware/widgetAuth';
 
 export function createApp(db: Db): Express {
   const app = express();
@@ -28,6 +30,7 @@ export function createApp(db: Db): Express {
   app.use('/v1/onboardStores', createOnboardingRouter(db));
   app.use('/v1/admin/stores', createAdminStoresRouter(db));
   app.use('/v1/merchant', createMerchantRouter(db));
+  app.use('/v1/quotes', createWidgetAuth(db), createQuotesRouter(db));
 
   // Never log err.message or the request: driver errors embed query params,
   // and JSON parse errors embed part of the body.

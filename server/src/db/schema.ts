@@ -12,34 +12,6 @@ import {
 import { sql } from "drizzle-orm";
 
 
-export const insurersTable = pgTable("insurers", {
-  id: integer().primaryKey().generatedAlwaysAsIdentity(),
-  name: varchar({ length: 255 }).notNull(),
-  status: varchar({ length: 20 }).notNull().default("active"),
-  contactEmail: varchar({ length: 255 }).notNull(),
-  createdAt: timestamp().notNull().defaultNow(),
-});
-
-export const insurancePlansTable = pgTable("insurance_plans", {
-  id: integer().primaryKey().generatedAlwaysAsIdentity(),
-  insurerId: integer()
-    .notNull()
-    .references(() => insurersTable.id),
-  name: varchar({ length: 255 }).notNull(),
-  status: varchar({ length: 20 }).notNull().default("active"),
-
-  // Eligibility rules
-  categories: text().array().notNull().default(sql`'{}'::text[]`),
-  minItemPrice: numeric({ precision: 12, scale: 2 }).notNull(),
-  maxItemPrice: numeric({ precision: 12, scale: 2 }).notNull(),
-  maxItemAgeMonths: integer().notNull(),
-
-  // Premium = item price x rate
-  premiumRate: numeric({ precision: 5, scale: 4 }).notNull(),
-
-  createdAt: timestamp().notNull().defaultNow(),
-});
-
 export const storesTable = pgTable("stores", {
   id: integer().primaryKey().generatedAlwaysAsIdentity(),
   name: varchar({ length: 255 }).notNull(),
@@ -97,16 +69,18 @@ export const quotesTable = pgTable("quotes", {
   storeId: integer()
     .notNull()
     .references(() => storesTable.id),
-  planId: integer()
-    .notNull()
-    .references(() => insurancePlansTable.id),
 
   // Snapshot of the item at quote time
   storeItemRef: varchar({ length: 255 }), // the store's own id for the product
   itemName: varchar({ length: 255 }).notNull(),
   itemCategory: varchar({ length: 100 }).notNull(),
   itemPrice: numeric({ precision: 12, scale: 2 }).notNull(),
-  itemAgeMonths: integer().notNull().default(0),
+  itemCondition: varchar({ length: 10 }).notNull(), // 'new' or 'used'
+
+  // From insureOnGo
+  insureongoQuoteId: varchar({ length: 255 }).notNull(),
+  insurerName: varchar({ length: 255 }).notNull(),
+  planName: varchar({ length: 255 }).notNull(),
 
   premium: numeric({ precision: 12, scale: 2 }).notNull(),
   status: varchar({ length: 20 }).notNull().default("offered"), // offered, accepted, expired
@@ -163,9 +137,6 @@ export const policiesTable = pgTable("policies", {
   storeId: integer()
     .notNull()
     .references(() => storesTable.id),
-  planId: integer()
-    .notNull()
-    .references(() => insurancePlansTable.id),
   customerId: integer()
     .notNull()
     .references(() => customersTable.id),

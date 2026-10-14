@@ -6,8 +6,6 @@ import { createApp } from '../src/app';
 import { createDb } from '../src/db';
 import {
   customersTable,
-  insurancePlansTable,
-  insurersTable,
   merchantSessionsTable,
   policiesTable,
   quotesTable,
@@ -44,24 +42,8 @@ async function insertStore(email: string, withPassword = true) {
   return store;
 }
 
-// Policies need an insurer, plan, customer and quote behind them.
+// Policies need a customer and quote behind them.
 async function insertPolicy(storeId: number, status: string, premium: string, ref: string) {
-  const [insurer] = await db
-    .insert(insurersTable)
-    .values({ name: 'Insurer', contactEmail: 'ops@insurer.com' })
-    .returning();
-  const [plan] = await db
-    .insert(insurancePlansTable)
-    .values({
-      insurerId: insurer.id,
-      name: 'Device cover',
-      categories: ['phones'],
-      minItemPrice: '0',
-      maxItemPrice: '10000000',
-      maxItemAgeMonths: 12,
-      premiumRate: '0.0500',
-    })
-    .returning();
   const [customer] = await db
     .insert(customersTable)
     .values({ name: 'Ada', email: 'ada@example.com' })
@@ -70,10 +52,13 @@ async function insertPolicy(storeId: number, status: string, premium: string, re
     .insert(quotesTable)
     .values({
       storeId,
-      planId: plan.id,
       itemName: 'Phone',
       itemCategory: 'phones',
       itemPrice: '400000.00',
+      itemCondition: 'new',
+      insureongoQuoteId: `quote-${ref}`,
+      insurerName: 'Insurer',
+      planName: 'Device cover',
       premium,
       expiresAt: new Date(Date.now() + 86_400_000),
     })
@@ -81,7 +66,6 @@ async function insertPolicy(storeId: number, status: string, premium: string, re
   await db.insert(policiesTable).values({
     quoteId: quote.id,
     storeId,
-    planId: plan.id,
     customerId: customer.id,
     issuanceKey: `issue-${ref}`,
     orderRef: ref,
@@ -111,7 +95,7 @@ describe('merchant dashboard API', () => {
 
   beforeEach(async () => {
     await db.execute(sql`truncate table ${policiesTable}, ${quotesTable}, ${customersTable},
-      ${insurancePlansTable}, ${insurersTable}, ${settlementsTable}, ${webhookEventsTable},
+      ${settlementsTable}, ${webhookEventsTable},
       ${merchantSessionsTable}, ${storesTable} restart identity cascade`);
   });
 
