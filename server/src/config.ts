@@ -24,8 +24,20 @@ export function getDefaultCommissionRate(): string {
   return raw;
 }
 
+const MIN_ADMIN_API_KEY_LENGTH = 32;
+
+// ADMIN_API_KEY: long random string sent by the admin UI. Protects /v1/admin routes.
+export function getAdminApiKey(): string {
+  const raw = process.env.ADMIN_API_KEY;
+  if (!raw || raw.length < MIN_ADMIN_API_KEY_LENGTH) {
+    throw new Error(`ADMIN_API_KEY must be at least ${MIN_ADMIN_API_KEY_LENGTH} characters`);
+  }
+  return raw;
+}
+
 // Called once at startup so the app refuses to start with bad configuration.
 export function assertConfig(): void {
   getEncryptionKey();
   getDefaultCommissionRate();
+  getAdminApiKey();
 }

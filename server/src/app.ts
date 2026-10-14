@@ -4,9 +4,18 @@ import { Db } from './db';
 import healthRoutes from './routes/health';
 import usersRoutes from './routes/users';
 import { createOnboardingRouter } from './routes/onboarding';
+import { createAdminStoresRouter } from './routes/adminStores';
+import { createMerchantRouter } from './routes/merchant';
 
 export function createApp(db: Db): Express {
   const app = express();
+
+  // Behind a proxy (the web container's nginx), every request comes from the proxy,
+  // so rate limits would be shared by everyone. TRUST_PROXY names which proxies to
+  // believe, e.g. "uniquelocal" for Docker's private network. Unset: trust none.
+  if (process.env.TRUST_PROXY) {
+    app.set('trust proxy', process.env.TRUST_PROXY);
+  }
 
   app.use(express.json());
 
@@ -17,6 +26,8 @@ export function createApp(db: Db): Express {
   app.use('/health', healthRoutes);
   app.use('/users', usersRoutes);
   app.use('/v1/onboardStores', createOnboardingRouter(db));
+  app.use('/v1/admin/stores', createAdminStoresRouter(db));
+  app.use('/v1/merchant', createMerchantRouter(db));
 
   // Never log err.message or the request: driver errors embed query params,
   // and JSON parse errors embed part of the body.

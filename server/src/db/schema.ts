@@ -57,6 +57,28 @@ export const storesTable = pgTable("stores", {
 
   enabledCategories: text().array().notNull().default(sql`'{}'::text[]`),
 
+  // Dashboard sign-in uses billingEmail + password. scrypt hash (see lib/passwords).
+  // Null for stores created before sign-in existed; those cannot sign in.
+  passwordHash: varchar({ length: 255 }),
+
+  createdAt: timestamp().notNull().defaultNow(),
+},
+  // One sign-in per email. Only stores with a password count, so older rows don't clash.
+  (t) => [
+    uniqueIndex("stores_login_email_uq")
+      .on(sql`lower(${t.billingEmail})`)
+      .where(sql`${t.passwordHash} is not null`),
+  ],
+);
+
+// Signed-in dashboard sessions. The cookie holds a random token; only its hash is stored.
+export const merchantSessionsTable = pgTable("merchant_sessions", {
+  id: integer().primaryKey().generatedAlwaysAsIdentity(),
+  storeId: integer()
+    .notNull()
+    .references(() => storesTable.id, { onDelete: "cascade" }),
+  tokenHash: varchar({ length: 64 }).notNull().unique(),
+  expiresAt: timestamp().notNull(),
   createdAt: timestamp().notNull().defaultNow(),
 });
 

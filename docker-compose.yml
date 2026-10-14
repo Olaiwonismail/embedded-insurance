@@ -5,13 +5,25 @@ services:
       dockerfile: Dockerfile
     env_file:
       - ./server/.env
+    environment:
+      # Requests arrive through the web container's nginx; read the visitor's
+      # address from it so the signup rate limit is per visitor, not shared.
+      TRUST_PROXY: uniquelocal
     ports:
       - "3000:3000"
     depends_on:
       db:
         condition: service_healthy
 
-
+  # Signup and admin pages, served by nginx. Forwards /v1 to the api service.
+  web:
+    build:
+      context: web
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
 
   db:
     image: postgres:16

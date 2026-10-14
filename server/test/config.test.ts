@@ -2,7 +2,7 @@ import { spawnSync } from 'child_process';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { getEncryptionKey } from '../src/config';
+import { getAdminApiKey, getEncryptionKey } from '../src/config';
 
 describe('ENCRYPTION_KEY', () => {
   const original = process.env.ENCRYPTION_KEY;
@@ -37,4 +37,22 @@ describe('ENCRYPTION_KEY', () => {
       expect(result.stderr).toContain('Refusing to start');
     }
   }, 60000);
+});
+
+describe('ADMIN_API_KEY', () => {
+  const original = process.env.ADMIN_API_KEY;
+  afterEach(() => {
+    process.env.ADMIN_API_KEY = original;
+  });
+
+  it('accepts a key of 32 characters or more', () => {
+    expect(getAdminApiKey()).toBe(original);
+  });
+
+  it('rejects a missing or short key', () => {
+    delete process.env.ADMIN_API_KEY;
+    expect(() => getAdminApiKey()).toThrow();
+    process.env.ADMIN_API_KEY = 'a'.repeat(31);
+    expect(() => getAdminApiKey()).toThrow();
+  });
 });

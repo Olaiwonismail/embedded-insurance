@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 
 import { Db } from '../db';
 import { storesTable } from '../db/schema';
+import { StoreWithoutSecrets, storeColumnsWithoutSecrets } from '../db/storeColumns';
 
 // Checks widget calls coming from a shopper's browser.
 // Origin can be faked by any script outside a browser, so this only stops other
@@ -14,25 +15,8 @@ export const PUBLIC_KEY_HEADER = 'x-insureongo-public-key';
 
 const MAX_PUBLIC_KEY_LENGTH = 255;
 
-// Every store column except the secrets, so a route cannot send them back by mistake.
-const widgetStoreColumns = {
-  id: storesTable.id,
-  name: storesTable.name,
-  status: storesTable.status,
-  platform: storesTable.platform,
-  publicKey: storesTable.publicKey,
-  allowedDomains: storesTable.allowedDomains,
-  commissionRate: storesTable.commissionRate,
-  settlementFrequency: storesTable.settlementFrequency,
-  billingEmail: storesTable.billingEmail,
-  enabledCategories: storesTable.enabledCategories,
-  createdAt: storesTable.createdAt,
-};
-
-export type WidgetStore = Omit<
-  typeof storesTable.$inferSelect,
-  'secretKeyHash' | 'webhookSecret'
->;
+// The store without its secrets, so a route cannot send them back by mistake.
+export type WidgetStore = StoreWithoutSecrets;
 
 declare global {
   namespace Express {
@@ -74,7 +58,7 @@ export function createWidgetAuth(db: Db): RequestHandler {
       }
 
       const [store] = await db
-        .select(widgetStoreColumns)
+        .select(storeColumnsWithoutSecrets)
         .from(storesTable)
         .where(eq(storesTable.publicKey, publicKey))
         .limit(1);
