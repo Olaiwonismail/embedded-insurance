@@ -20,6 +20,10 @@ export interface InsureongoMatch {
 
 export interface InsureongoPolicyInput {
   insureongoQuoteId: string;
+  // Same value for every try at the same order (storeId:orderRef:quoteId). The real
+  // client must send it so insureOnGo returns the first policy instead of issuing a
+  // second one when we retry. Ask insureOnGo how their API takes it.
+  issuanceKey: string;
   name: string;
   email: string;
   phone?: string;

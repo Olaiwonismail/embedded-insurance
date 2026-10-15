@@ -1,6 +1,11 @@
 // Turns saved paid-order webhooks into policies.
-// Each event is handled in one transaction, so a crash or an insureOnGo error
-// never leaves a policy without its quote and event updated, or the other way round.
+//
+// Each event goes through three steps, so no transaction is open while insureOnGo is called:
+//   1. Reserve: checks, customer, and a "pending" policy that claims the issuanceKey. Commit.
+//   2. Call insureOnGo, outside any transaction.
+//   3. Activate: policy "active", quote "accepted", event "processed", in one transaction.
+// If the process dies between 1 and 3, the pending policy is still there and the
+// next run picks up from step 2. See docs/issuance-worker.md.
 
 import { and, asc, eq, or, sql } from 'drizzle-orm';
 
@@ -12,10 +17,13 @@ import {
   storesTable,
   webhookEventsTable,
 } from '../../db/schema';
-import { InsureongoClient } from '../insureongo';
+import { InsureongoClient, InsureongoPolicyInput } from '../insureongo';
 import { PAID_ORDER_PLATFORMS } from './orders';
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+
+// How often the timer looks for events still "received" (new, or left by a failed call).
+export const ISSUANCE_INTERVAL_MS = 30_000;
 
 // premium (2dp) * rate, rounded half-up to 2dp. Exact decimal math, no floats.
 export function commissionFor(premium: string, rate: string): string {
@@ -37,6 +45,10 @@ function paidOrderCondition() {
   );
 }
 
+function lockKey(tx: Tx, key: string) {
+  return tx.execute(sql`select pg_advisory_xact_lock(hashtext(${key}))`);
+}
+
 async function markFailed(tx: Tx, eventId: number, error: string) {
   await tx
     .update(webhookEventsTable)
@@ -51,14 +63,18 @@ async function markProcessed(tx: Tx, eventId: number) {
     .where(eq(webhookEventsTable.id, eventId));
 }
 
-// Handles one event. Throws only if the insureOnGo call fails (or the database does);
-// the transaction then rolls back and the event stays "received" for the next run.
-export async function processWebhookEvent(
-  db: Db,
-  client: InsureongoClient,
-  eventId: number,
-): Promise<void> {
-  await db.transaction(async (tx) => {
+// What step 2 needs. Null means the event is finished (processed, failed or ignored).
+interface Reserved {
+  eventId: number;
+  policyId: number;
+  quoteId: number;
+  issuanceKey: string;
+  call: InsureongoPolicyInput;
+}
+
+// Step 1. Returns null when there is nothing to issue.
+async function reserve(db: Db, eventId: number): Promise<Reserved | null> {
+  return db.transaction(async (tx) => {
     // Skip rows another run is already working on.
     const [event] = await tx
       .select({
@@ -75,33 +91,59 @@ export async function processWebhookEvent(
       .for('update', { of: webhookEventsTable, skipLocked: true })
       .limit(1);
 
-    if (!event) return;
+    if (!event) return null;
 
     const platform = Object.hasOwn(PAID_ORDER_PLATFORMS, event.platform)
       ? PAID_ORDER_PLATFORMS[event.platform]
       : undefined;
-    if (!platform || platform.type !== event.type) return; // not a paid order: ignore
+    if (!platform || platform.type !== event.type) return null; // not a paid order: ignore
 
     const extracted = platform.extract(event.payload);
     if ('missing' in extracted) {
       await markFailed(tx, event.id, `missing fields: ${extracted.missing.join(', ')}`);
-      return;
+      return null;
     }
     const { order } = extracted;
 
     // Second guard against duplicates. Checked before the quote, because once
     // a policy exists its quote is "accepted" and would otherwise fail the checks below.
     const issuanceKey = `${event.storeId}:${order.orderRef}:${order.quoteId}`;
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${issuanceKey}))`);
+    await lockKey(tx, issuanceKey);
 
     const [existing] = await tx
-      .select({ id: policiesTable.id })
+      .select()
       .from(policiesTable)
       .where(eq(policiesTable.issuanceKey, issuanceKey))
       .limit(1);
-    if (existing) {
+
+    if (existing && existing.status !== 'pending') {
       await markProcessed(tx, event.id);
-      return;
+      return null;
+    }
+
+    if (existing) {
+      // An earlier run reserved this order and stopped before it finished. Pick it up.
+      const quoteRef = await tx
+        .select({ insureongoQuoteId: quotesTable.insureongoQuoteId })
+        .from(quotesTable)
+        .where(eq(quotesTable.id, existing.quoteId));
+      const customer = await tx
+        .select()
+        .from(customersTable)
+        .where(eq(customersTable.id, existing.customerId));
+      return {
+        eventId: event.id,
+        policyId: existing.id,
+        quoteId: existing.quoteId,
+        issuanceKey,
+        call: {
+          insureongoQuoteId: quoteRef[0].insureongoQuoteId,
+          issuanceKey,
+          name: customer[0].name,
+          email: customer[0].email,
+          ...(customer[0].phone ? { phone: customer[0].phone } : {}),
+        },
+      };
     }
 
     const [quote] = await tx
@@ -113,25 +155,35 @@ export async function processWebhookEvent(
 
     if (!quote) {
       await markFailed(tx, event.id, `quote not found: ${order.quoteId}`);
-      return;
+      return null;
     }
     if (quote.storeId !== event.storeId) {
       await markFailed(tx, event.id, `quote ${quote.id} belongs to a different store`);
-      return;
+      return null;
     }
     if (quote.status !== 'offered') {
       await markFailed(tx, event.id, `quote ${quote.id} status is ${quote.status}, not offered`);
-      return;
+      return null;
     }
     if (quote.expiresAt.getTime() <= Date.now()) {
       await markFailed(tx, event.id, `quote ${quote.id} expired`);
-      return;
+      return null;
+    }
+    // The quote stays "offered" while its policy is pending, so check for another order using it.
+    const [taken] = await tx
+      .select({ id: policiesTable.id })
+      .from(policiesTable)
+      .where(eq(policiesTable.quoteId, quote.id))
+      .limit(1);
+    if (taken) {
+      await markFailed(tx, event.id, `quote ${quote.id} is already used by another order`);
+      return null;
     }
 
     // Find or create the customer by email. The lock stops two orders with
     // the same email from both creating a customer.
     const { name, email, phone } = order.customer;
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'customer:' + email}))`);
+    await lockKey(tx, `customer:${email}`);
 
     const [found] = await tx
       .select({ id: customersTable.id })
@@ -156,37 +208,100 @@ export async function processWebhookEvent(
       customerId = created.id;
     }
 
-    const issued = await client.issuePolicy({
-      insureongoQuoteId: quote.insureongoQuoteId,
-      name,
-      email,
-      ...(phone !== undefined ? { phone } : {}),
-    });
+    // Claims the issuanceKey (unique) before insureOnGo is called.
+    const [pending] = await tx
+      .insert(policiesTable)
+      .values({
+        quoteId: quote.id,
+        storeId: event.storeId,
+        customerId,
+        settlementId: null,
+        issuanceKey,
+        orderRef: order.orderRef,
+        policyNumber: null,
+        itemName: quote.itemName,
+        itemCategory: quote.itemCategory,
+        itemPrice: quote.itemPrice,
+        premium: quote.premium,
+        commissionAmount: commissionFor(quote.premium, event.commissionRate),
+        status: 'pending',
+      })
+      .returning({ id: policiesTable.id });
 
-    await tx.insert(policiesTable).values({
+    return {
+      eventId: event.id,
+      policyId: pending.id,
       quoteId: quote.id,
-      storeId: event.storeId,
-      customerId,
-      settlementId: null,
       issuanceKey,
-      orderRef: order.orderRef,
-      policyNumber: issued.policyNumber,
-      itemName: quote.itemName,
-      itemCategory: quote.itemCategory,
-      itemPrice: quote.itemPrice,
-      premium: quote.premium,
-      commissionAmount: commissionFor(quote.premium, event.commissionRate),
-      status: 'active',
-      startsAt: issued.startsAt,
-      endsAt: issued.endsAt,
-    });
+      call: {
+        insureongoQuoteId: quote.insureongoQuoteId,
+        issuanceKey,
+        name,
+        email,
+        ...(phone !== undefined ? { phone } : {}),
+      },
+    };
+  });
+}
 
-    await tx
-      .update(quotesTable)
-      .set({ status: 'accepted' })
-      .where(eq(quotesTable.id, quote.id));
+// Handles one event. Throws only if the insureOnGo call fails (or the database does);
+// the event then stays "received" and the next run tries again.
+export async function processWebhookEvent(
+  db: Db,
+  client: InsureongoClient,
+  eventId: number,
+): Promise<void> {
+  const reserved = await reserve(db, eventId);
+  if (!reserved) return;
 
-    await markProcessed(tx, event.id);
+  // Step 2. No transaction and no row locks are held here.
+  let issued;
+  try {
+    issued = await client.issuePolicy(reserved.call);
+  } catch (err) {
+    // insureOnGo said no or could not be reached: no policy was issued, so drop the
+    // reservation. If this delete never runs (crash), the next run resumes it instead.
+    await db
+      .delete(policiesTable)
+      .where(and(eq(policiesTable.id, reserved.policyId), eq(policiesTable.status, 'pending')));
+    throw err;
+  }
+
+  // Step 3.
+  await db.transaction(async (tx) => {
+    await lockKey(tx, reserved.issuanceKey);
+
+    const [policy] = await tx
+      .select({ id: policiesTable.id, status: policiesTable.status })
+      .from(policiesTable)
+      .where(eq(policiesTable.issuanceKey, reserved.issuanceKey))
+      .for('update')
+      .limit(1);
+
+    // A failed run elsewhere dropped the reservation. Leave the event "received";
+    // the retry sends the same issuanceKey, so insureOnGo returns this same policy.
+    if (!policy) {
+      throw new Error('Pending policy no longer exists');
+    }
+
+    if (policy.status === 'pending') {
+      await tx
+        .update(policiesTable)
+        .set({
+          status: 'active',
+          policyNumber: issued.policyNumber,
+          startsAt: issued.startsAt,
+          endsAt: issued.endsAt,
+        })
+        .where(eq(policiesTable.id, policy.id));
+
+      await tx
+        .update(quotesTable)
+        .set({ status: 'accepted' })
+        .where(eq(quotesTable.id, reserved.quoteId));
+    }
+
+    await markProcessed(tx, reserved.eventId);
   });
 }
 
@@ -234,4 +349,17 @@ export function startIssuanceWorker(db: Db, client: InsureongoClient): void {
       running = false;
     }
   })();
+}
+
+// Runs the worker now and then every intervalMs, so events left "received"
+// are retried even when no new webhook arrives. Returns a function that stops it.
+export function startIssuanceTimer(
+  db: Db,
+  client: InsureongoClient,
+  intervalMs: number = ISSUANCE_INTERVAL_MS,
+): () => void {
+  startIssuanceWorker(db, client);
+  const timer = setInterval(() => startIssuanceWorker(db, client), intervalMs);
+  timer.unref(); // don't keep the process alive just for this
+  return () => clearInterval(timer);
 }

@@ -13,7 +13,7 @@ import {
   webhookEventsTable,
 } from '../src/db/schema';
 import { InsureongoClient, fakeInsureongoClient } from '../src/lib/insureongo';
-import { commissionFor, runIssuanceWorker } from '../src/lib/issuance/worker';
+import { commissionFor, runIssuanceWorker, startIssuanceTimer } from '../src/lib/issuance/worker';
 import { generatePublicKey, generateSecretKey, hashSecretKey } from '../src/lib/keys';
 import { encryptSecret } from '../src/lib/secrets';
 import { TEST_DATABASE_URL } from './global-setup';
@@ -355,11 +355,134 @@ describe('policy issuance worker', () => {
       .send(body);
     expect(res.status).toBe(200);
 
+    // A pending policy shows up first, so wait for the event to finish
     await vi.waitFor(async () => {
-      expect(await db.select().from(policiesTable)).toHaveLength(1);
+      const [event] = await db.select().from(webhookEventsTable);
+      expect(event.status).toBe('processed');
     });
-    const [event] = await db.select().from(webhookEventsTable);
-    expect(event.status).toBe('processed');
+    const policies = await db.select().from(policiesTable);
+    expect(policies).toHaveLength(1);
+    expect(policies[0].status).toBe('active');
+  });
+
+  it('holds no transaction or row locks while insureOnGo is called', async () => {
+    const store = await insertStore();
+    const quote = await insertQuote(store.id);
+    const event = await insertEvent(store.id, 'order.paid', customBody(quote.id));
+
+    const checks: string[] = [];
+    const client: InsureongoClient = {
+      ...fakeInsureongoClient,
+      async issuePolicy(input) {
+        // Another connection: NOWAIT errors at once if a lock is still held.
+        await db.select().from(quotesTable).where(eq(quotesTable.id, quote.id)).for('update', { noWait: true });
+        await db.select().from(webhookEventsTable).where(eq(webhookEventsTable.id, event.id)).for('update', { noWait: true });
+        // The reservation is already committed, so other runs can see it.
+        const [policy] = await db.select().from(policiesTable);
+        checks.push(policy.status);
+        return fakeInsureongoClient.issuePolicy(input);
+      },
+    };
+
+    await runIssuanceWorker(db, client);
+
+    expect(checks).toEqual(['pending']);
+    const [policy] = await db.select().from(policiesTable);
+    expect(policy.status).toBe('active');
+    expect((await getEvent(event.id)).status).toBe('processed');
+  });
+
+  it('picks up a pending policy left by a crash and finishes it', async () => {
+    const store = await insertStore();
+    const quote = await insertQuote(store.id);
+    const event = await insertEvent(store.id, 'order.paid', customBody(quote.id));
+    const issuanceKey = `${store.id}:ord_1001:${quote.id}`;
+
+    // What step 1 leaves behind if the process dies before step 3
+    const [customer] = await db
+      .insert(customersTable)
+      .values({ name: 'Jane Doe', email: 'jane@example.com', phone: '+2348000000001' })
+      .returning();
+    await db.insert(policiesTable).values({
+      quoteId: quote.id,
+      storeId: store.id,
+      customerId: customer.id,
+      issuanceKey,
+      orderRef: 'ord_1001',
+      itemName: quote.itemName,
+      itemCategory: quote.itemCategory,
+      itemPrice: quote.itemPrice,
+      premium: quote.premium,
+      commissionAmount: '1.54',
+      status: 'pending',
+    });
+
+    const client = { ...fakeInsureongoClient, issuePolicy: vi.fn(fakeInsureongoClient.issuePolicy) };
+    await runIssuanceWorker(db, client);
+
+    expect(client.issuePolicy).toHaveBeenCalledTimes(1);
+    expect(client.issuePolicy).toHaveBeenCalledWith({
+      insureongoQuoteId: quote.insureongoQuoteId,
+      issuanceKey,
+      name: 'Jane Doe',
+      email: 'jane@example.com',
+      phone: '+2348000000001',
+    });
+    const policies = await db.select().from(policiesTable);
+    expect(policies).toHaveLength(1);
+    expect(policies[0]).toMatchObject({ status: 'active', policyNumber: `POL-${quote.insureongoQuoteId}` });
+    expect((await getQuote(quote.id)).status).toBe('accepted');
+    expect((await getEvent(event.id)).status).toBe('processed');
+    expect(await db.select().from(customersTable)).toHaveLength(1);
+  });
+
+  it('fails a second order for a quote that already has a pending policy', async () => {
+    const store = await insertStore();
+    const quote = await insertQuote(store.id);
+    const [customer] = await db
+      .insert(customersTable)
+      .values({ name: 'Jane Doe', email: 'jane@example.com' })
+      .returning();
+    await db.insert(policiesTable).values({
+      quoteId: quote.id,
+      storeId: store.id,
+      customerId: customer.id,
+      issuanceKey: `${store.id}:ord_A:${quote.id}`,
+      orderRef: 'ord_A',
+      itemName: quote.itemName,
+      itemCategory: quote.itemCategory,
+      itemPrice: quote.itemPrice,
+      premium: quote.premium,
+      commissionAmount: '1.54',
+      status: 'pending',
+    });
+    const event = await insertEvent(store.id, 'order.paid', customBody(quote.id, { orderRef: 'ord_B' }));
+
+    await runIssuanceWorker(db, fakeInsureongoClient);
+
+    const saved = await getEvent(event.id);
+    expect(saved.status).toBe('failed');
+    expect(saved.error).toMatch(/already used/);
+    expect(await db.select().from(policiesTable)).toHaveLength(1);
+  });
+
+  it('the timer picks up events with no new webhook', async () => {
+    const store = await insertStore();
+    const quote = await insertQuote(store.id);
+
+    const stop = startIssuanceTimer(db, fakeInsureongoClient, 50);
+    try {
+      // Saved after the first run, so only a later tick can handle it
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const event = await insertEvent(store.id, 'order.paid', customBody(quote.id));
+
+      await vi.waitFor(async () => {
+        expect((await getEvent(event.id)).status).toBe('processed');
+      });
+      expect(await db.select().from(policiesTable)).toHaveLength(1);
+    } finally {
+      stop();
+    }
   });
 
   it('ignores events that are not paid orders', async () => {
