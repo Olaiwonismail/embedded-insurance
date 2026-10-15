@@ -39,7 +39,7 @@ async function insertStore(overrides: { enabledCategories?: string[]; status?: s
 }
 
 function stubClient(matches: InsureongoMatch[]): InsureongoClient & { getQuotes: ReturnType<typeof vi.fn> } {
-  return { getQuotes: vi.fn().mockResolvedValue(matches) };
+  return { getQuotes: vi.fn().mockResolvedValue(matches), issuePolicy: vi.fn() };
 }
 
 function buildApp(client?: InsureongoClient): Express {

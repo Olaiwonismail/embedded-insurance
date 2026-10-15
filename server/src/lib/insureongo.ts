@@ -18,11 +18,28 @@ export interface InsureongoMatch {
   premium: string; // string to avoid floating-point issues (stored in a numeric column)
 }
 
-export interface InsureongoClient {
-  getQuotes(item: InsureongoItemInput): Promise<InsureongoMatch[]>;
+export interface InsureongoPolicyInput {
+  insureongoQuoteId: string;
+  name: string;
+  email: string;
+  phone?: string;
 }
 
-// Fake client for development and tests. Always returns two fixed matches.
+// The shape below is a guess at what insureOnGo's API will return when it issues a policy.
+// Update it once the real response format is known.
+export interface InsureongoPolicy {
+  policyNumber: string;
+  startsAt: Date;
+  endsAt: Date;
+}
+
+export interface InsureongoClient {
+  getQuotes(item: InsureongoItemInput): Promise<InsureongoMatch[]>;
+  issuePolicy(input: InsureongoPolicyInput): Promise<InsureongoPolicy>;
+}
+
+// Fake client for development and tests. Always returns two fixed matches,
+// and always issues a one-year policy.
 export const fakeInsureongoClient: InsureongoClient = {
   async getQuotes(_item: InsureongoItemInput): Promise<InsureongoMatch[]> {
     return [
@@ -39,5 +56,16 @@ export const fakeInsureongoClient: InsureongoClient = {
         premium: '7.49',
       },
     ];
+  },
+
+  async issuePolicy(input: InsureongoPolicyInput): Promise<InsureongoPolicy> {
+    const startsAt = new Date();
+    const endsAt = new Date(startsAt);
+    endsAt.setFullYear(endsAt.getFullYear() + 1);
+    return {
+      policyNumber: `POL-${input.insureongoQuoteId}`,
+      startsAt,
+      endsAt,
+    };
   },
 };

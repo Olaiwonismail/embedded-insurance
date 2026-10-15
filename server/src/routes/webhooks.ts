@@ -6,7 +6,8 @@ import { storesTable, webhookEventsTable } from '../db/schema';
 import { decryptSecret } from '../lib/secrets';
 import { getPlatformVerifier, WebhookValidationError } from '../lib/webhooks';
 
-export function createWebhooksRouter(db: Db): Router {
+// onEventSaved runs after each insert and must not block; app.ts uses it to start the issuance worker.
+export function createWebhooksRouter(db: Db, onEventSaved: () => void = () => {}): Router {
   const router = Router();
 
   // Raw body captured at route level before any JSON parser rewrites it
@@ -84,6 +85,8 @@ export function createWebhooksRouter(db: Db): Router {
           status: 'received',
         })
         .onConflictDoNothing();
+
+      onEventSaved();
 
       // 7. Respond 200 within a few hundred milliseconds. Do no more work on this request.
       res.status(200).json({ ok: true });

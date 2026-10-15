@@ -1,9 +1,9 @@
 import crypto from 'crypto';
+import express from 'express';
 import { eq, sql } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { createApp } from '../src/app';
 import { createDb } from '../src/db';
 import { storesTable, webhookEventsTable } from '../src/db/schema';
 import { generatePublicKey, generateSecretKey, hashSecretKey } from '../src/lib/keys';

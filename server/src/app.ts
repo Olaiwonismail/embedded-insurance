@@ -10,8 +10,10 @@ import { createQuotesRouter } from './routes/quotes';
 import { createWidgetAuth } from './middleware/widgetAuth';
 
 import { createWebhooksRouter } from './routes/webhooks';
+import { InsureongoClient, fakeInsureongoClient } from './lib/insureongo';
+import { startIssuanceWorker } from './lib/issuance/worker';
 
-export function createApp(db: Db): Express {
+export function createApp(db: Db, insureongo: InsureongoClient = fakeInsureongoClient): Express {
   const app = express();
 
   // Behind a proxy (the web container's nginx), every request comes from the proxy,
@@ -22,7 +24,8 @@ export function createApp(db: Db): Express {
   }
 
   // Webhook signatures require exact raw bytes; mounted before express.json()
-  app.use('/v1/webhooks', createWebhooksRouter(db));
+  // Each saved event starts the policy issuance worker in the background
+  app.use('/v1/webhooks', createWebhooksRouter(db, () => startIssuanceWorker(db, insureongo)));
 
   app.use(express.json());
 

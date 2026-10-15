@@ -100,6 +100,7 @@ export const webhookEventsTable = pgTable(
     type: varchar({ length: 100 }).notNull(),
     payload: jsonb().notNull(),
     status: varchar({ length: 20 }).notNull().default("received"), // received, processed, failed
+    error: text(), // why it failed; set only when status is failed
     receivedAt: timestamp().notNull().defaultNow(),
     processedAt: timestamp(),
   },
