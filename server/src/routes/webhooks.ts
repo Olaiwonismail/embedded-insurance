@@ -1,4 +1,4 @@
-import express, { Router, Request, Response, NextFunction } from 'express';
+import express, { Router } from 'express';
 import { eq } from 'drizzle-orm';
 
 import { Db } from '../db';
@@ -12,7 +12,7 @@ export function createWebhooksRouter(db: Db): Router {
   // Raw body captured at route level before any JSON parser rewrites it
   router.use(express.raw({ type: '*/*', limit: '10mb' }));
 
-  router.post('/:platform/:publicKey', async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/:platform/:publicKey', async (req, res, next) => {
     try {
       const { platform, publicKey } = req.params;
 
