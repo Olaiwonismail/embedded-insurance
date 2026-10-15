@@ -9,6 +9,8 @@ import { createMerchantRouter } from './routes/merchant';
 import { createQuotesRouter } from './routes/quotes';
 import { createWidgetAuth } from './middleware/widgetAuth';
 
+import { createWebhooksRouter } from './routes/webhooks';
+
 export function createApp(db: Db): Express {
   const app = express();
 
@@ -18,6 +20,9 @@ export function createApp(db: Db): Express {
   if (process.env.TRUST_PROXY) {
     app.set('trust proxy', process.env.TRUST_PROXY);
   }
+
+  // Webhook signatures require exact raw bytes; mounted before express.json()
+  app.use('/v1/webhooks', createWebhooksRouter(db));
 
   app.use(express.json());
 
