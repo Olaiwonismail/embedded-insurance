@@ -1,6 +1,9 @@
+import crypto from 'crypto';
 import { eq, sql } from 'drizzle-orm';
+import request from 'supertest';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createApp } from '../src/app';
 import { createDb } from '../src/db';
 import {
   customersTable,
@@ -336,6 +339,27 @@ describe('policy issuance worker', () => {
     expect(policy.issuanceKey).toBe(`${store.id}:820982911946154:${quote.id}`);
     const [customer] = await db.select().from(customersTable);
     expect(customer).toMatchObject({ name: 'Bob Norman', email: 'bob@example.com' });
+  });
+
+  it('is started by the webhook receiver after it saves an event', async () => {
+    const store = await insertStore();
+    const quote = await insertQuote(store.id);
+    const body = JSON.stringify(customBody(quote.id));
+    const signature = crypto.createHmac('sha256', 'whsec_test').update(body).digest('hex');
+
+    const res = await request(createApp(db))
+      .post(`/v1/webhooks/custom/${store.publicKey}`)
+      .set('Content-Type', 'application/json')
+      .set('X-InsureOnGo-Signature', signature)
+      .set('X-InsureOnGo-Timestamp', String(Math.floor(Date.now() / 1000)))
+      .send(body);
+    expect(res.status).toBe(200);
+
+    await vi.waitFor(async () => {
+      expect(await db.select().from(policiesTable)).toHaveLength(1);
+    });
+    const [event] = await db.select().from(webhookEventsTable);
+    expect(event.status).toBe('processed');
   });
 
   it('ignores events that are not paid orders', async () => {

@@ -8,10 +8,14 @@ import { createDb } from '../src/db';
 import { storesTable, webhookEventsTable } from '../src/db/schema';
 import { generatePublicKey, generateSecretKey, hashSecretKey } from '../src/lib/keys';
 import { encryptSecret } from '../src/lib/secrets';
+import { createWebhooksRouter } from '../src/routes/webhooks';
 import { TEST_DATABASE_URL } from './global-setup';
 
 const db = createDb(TEST_DATABASE_URL);
-const app = createApp(db);
+
+// The receiver alone, without the issuance worker, so saved events stay "received".
+const app = express();
+app.use('/v1/webhooks', createWebhooksRouter(db));
 
 const KNOWN_SECRET = 'whsec_known_test_secret_abc123';
 
