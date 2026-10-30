@@ -57,3 +57,6 @@ venv/
 .yarn/unplugged/
 .yarn/install-state.gz
 .pnpm-store/
+
+# Demo shop state
+demo-store/data/
