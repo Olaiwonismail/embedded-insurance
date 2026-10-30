@@ -315,32 +315,6 @@ describe('policy issuance worker', () => {
     expect(policies.every((p) => p.customerId === customers[0].id)).toBe(true);
   });
 
-  it('issues a policy from a Shopify orders/paid event', async () => {
-    const store = await insertStore({ platform: 'shopify' });
-    const quote = await insertQuote(store.id);
-    const event = await insertEvent(store.id, 'orders/paid', {
-      id: 820982911946154,
-      email: 'bob@example.com',
-      phone: '+2348000000003',
-      customer: { first_name: 'Bob', last_name: 'Norman' },
-      line_items: [
-        { title: 'iPhone 15', properties: [] },
-        {
-          title: 'Device protection',
-          properties: [{ name: 'insureongo_quote_id', value: String(quote.id) }],
-        },
-      ],
-    });
-
-    await runIssuanceWorker(db, fakeInsureongoClient);
-
-    expect((await getEvent(event.id)).status).toBe('processed');
-    const [policy] = await db.select().from(policiesTable);
-    expect(policy.issuanceKey).toBe(`${store.id}:820982911946154:${quote.id}`);
-    const [customer] = await db.select().from(customersTable);
-    expect(customer).toMatchObject({ name: 'Bob Norman', email: 'bob@example.com' });
-  });
-
   it('is started by the webhook receiver after it saves an event', async () => {
     const store = await insertStore();
     const quote = await insertQuote(store.id);
@@ -486,13 +460,9 @@ describe('policy issuance worker', () => {
   });
 
   it('ignores events that are not paid orders', async () => {
-    const store = await insertStore({ platform: 'shopify' });
+    const store = await insertStore();
     const quote = await insertQuote(store.id);
-    const event = await insertEvent(store.id, 'orders/fulfilled', {
-      id: 1,
-      email: 'bob@example.com',
-      line_items: [{ properties: [{ name: 'insureongo_quote_id', value: String(quote.id) }] }],
-    });
+    const event = await insertEvent(store.id, 'order.refunded', customBody(quote.id));
 
     await runIssuanceWorker(db, fakeInsureongoClient);
 

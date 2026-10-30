@@ -28,7 +28,7 @@ async function insertStore(email: string, withPassword = true) {
     .insert(storesTable)
     .values({
       name: email.split('@')[0],
-      platform: 'shopify',
+      platform: 'custom',
       publicKey: generatePublicKey(),
       secretKeyHash: hashSecretKey(generateSecretKey()),
       webhookSecret: encryptSecret('whsec_test'),

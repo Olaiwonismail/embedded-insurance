@@ -7,7 +7,9 @@ import { createOnboardingRouter } from './routes/onboarding';
 import { createAdminStoresRouter } from './routes/adminStores';
 import { createMerchantRouter } from './routes/merchant';
 import { createQuotesRouter } from './routes/quotes';
+import widgetRoutes from './routes/widget';
 import { createWidgetAuth } from './middleware/widgetAuth';
+import { createWidgetPreflight, allowWidgetOrigin } from './middleware/widgetCors';
 
 import { createWebhooksRouter } from './routes/webhooks';
 import { InsureongoClient, fakeInsureongoClient } from './lib/insureongo';
@@ -38,7 +40,17 @@ export function createApp(db: Db, insureongo: InsureongoClient = fakeInsureongoC
   app.use('/v1/onboardStores', createOnboardingRouter(db));
   app.use('/v1/admin/stores', createAdminStoresRouter(db));
   app.use('/v1/merchant', createMerchantRouter(db));
-  app.use('/v1/quotes', createWidgetAuth(db), createQuotesRouter(db));
+  app.use('/widget', widgetRoutes);
+
+  // The preflight runs before the auth check on purpose: a browser sends no custom
+  // headers on an OPTIONS request, so there is no public key for the check to read.
+  app.use(
+    '/v1/quotes',
+    createWidgetPreflight(db),
+    createWidgetAuth(db),
+    allowWidgetOrigin,
+    createQuotesRouter(db),
+  );
 
   // Never log err.message or the request: driver errors embed query params,
   // and JSON parse errors embed part of the body.

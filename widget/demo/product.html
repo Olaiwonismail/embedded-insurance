@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Demo product page</title>
+    <script src="http://localhost:3000/widget/v1/insureongo.js" defer></script>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 32rem;
+        margin: 3rem auto;
+        padding: 0 1rem;
+      }
+      fieldset { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; }
+      insureongo-offer { --insureongo-accent: #0b6b3a; margin: 0.5rem 0; }
+      pre { background: #f5f5f5; padding: 0.75rem; border-radius: 6px; overflow-x: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>iPhone 15</h1>
+    <p>&#8358;900,000</p>
+
+    <form id="cart">
+      <fieldset>
+        <legend>Add protection</legend>
+        <insureongo-offer
+          public-key="REPLACE_WITH_PUBLIC_KEY"
+          item-name="iPhone 15"
+          item-category="phones"
+          item-price="900000"
+          item-condition="new"
+          store-item-ref="SKU-123"
+        ></insureongo-offer>
+      </fieldset>
+      <button type="submit">Add to cart</button>
+    </form>
+
+    <h2>What the cart sees</h2>
+    <pre id="out">nothing chosen yet</pre>
+
+    <script>
+      const offer = document.querySelector('insureongo-offer');
+      const out = document.getElementById('out');
+
+      function show(note) {
+        out.textContent = [
+          note,
+          'element.value: ' + JSON.stringify(offer.value),
+          'form field: ' + JSON.stringify(
+            new FormData(document.getElementById('cart')).get('insureongo_quote_id'),
+          ),
+        ].join('\n');
+      }
+
+      offer.addEventListener('insureongo:change', (event) => {
+        show('insureongo:change detail: ' + JSON.stringify(event.detail));
+      });
+
+      document.getElementById('cart').addEventListener('submit', (event) => {
+        event.preventDefault();
+        show('submitted');
+      });
+    </script>
+  </body>
+</html>

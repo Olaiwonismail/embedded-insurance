@@ -1,10 +1,6 @@
 // Calls to the insureOnGo API. In development Vite forwards /v1 to the server.
 
-export const PLATFORMS = [
-  { value: 'shopify', label: 'Shopify' },
-  { value: 'woocommerce', label: 'WooCommerce' },
-  { value: 'custom', label: 'Custom website' },
-] as const;
+export const PLATFORMS = [{ value: 'custom', label: 'Custom website' }] as const;
 
 export const CATEGORIES = [
   { value: 'phones', label: 'Phones' },

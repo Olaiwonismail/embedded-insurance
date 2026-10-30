@@ -23,7 +23,7 @@ async function insertStore(overrides: { enabledCategories?: string[]; status?: s
     .insert(storesTable)
     .values({
       name: 'Test Store',
-      platform: 'shopify',
+      platform: 'custom',
       publicKey: generatePublicKey(),
       secretKeyHash: hashSecretKey(generateSecretKey()),
       webhookSecret: encryptSecret('whsec_test'),

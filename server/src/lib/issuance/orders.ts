@@ -12,9 +12,6 @@ export interface PaidOrder {
 
 export type ExtractResult = { order: PaidOrder } | { missing: string[] };
 
-// Line item property the store's checkout sets to our quote id.
-export const SHOPIFY_QUOTE_PROPERTY = 'insureongo_quote_id';
-
 function text(value: unknown): string | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return String(value);
@@ -81,40 +78,10 @@ export function extractCustomOrder(payload: unknown): ExtractResult {
   });
 }
 
-// Shopify order: the quote id is a line item property, the rest comes from the order.
-export function extractShopifyOrder(payload: unknown): ExtractResult {
-  const order = asObject(payload);
-  const customer = asObject(order.customer);
-  const billing = asObject(order.billing_address);
-
-  let quoteId: number | undefined;
-  const lineItems = Array.isArray(order.line_items) ? order.line_items : [];
-  for (const item of lineItems) {
-    const properties = asObject(item).properties;
-    if (!Array.isArray(properties)) continue;
-    const property = properties.find((p) => asObject(p).name === SHOPIFY_QUOTE_PROPERTY);
-    if (property) {
-      quoteId = wholeNumber(asObject(property).value);
-      break;
-    }
-  }
-
-  const fullName = [text(customer.first_name), text(customer.last_name)].filter(Boolean).join(' ');
-
-  return build({
-    quoteId,
-    orderRef: text(order.id),
-    name: fullName || text(billing.name),
-    email: text(order.email) ?? text(customer.email),
-    phone: text(order.phone) ?? text(customer.phone) ?? text(billing.phone),
-  });
-}
-
 // Which event type means "order paid" on each platform. Add new platforms here.
 export const PAID_ORDER_PLATFORMS: Record<
   string,
   { type: string; extract: (payload: unknown) => ExtractResult }
 > = {
-  shopify: { type: 'orders/paid', extract: extractShopifyOrder },
   custom: { type: 'order.paid', extract: extractCustomOrder },
 };

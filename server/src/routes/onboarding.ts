@@ -15,7 +15,9 @@ import {
   hashSecretKey,
 } from '../lib/keys';
 
-export const PLATFORMS = ['shopify', 'woocommerce', 'custom'] as const;
+// Only platforms with a webhook verifier and a paid-order extractor belong here;
+// anything else accepts signups whose webhooks then 404.
+export const PLATFORMS = ['custom'] as const;
 // Standard categories. Merchants can also name their own products (see CUSTOM_CATEGORY);
 // those are saved too but only get quotes once an insurance plan covers them.
 export const CATEGORIES = ['phones', 'laptops', 'tablets'] as const;

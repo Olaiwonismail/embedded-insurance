@@ -27,7 +27,7 @@ const PASSWORD = 'correct horse battery';
 let emailCount = 0;
 const validBody = () => ({
   name: '3C Hub',
-  platform: 'shopify',
+  platform: 'custom',
   allowedDomains: ['3chub.com', 'shop.3chub.com'],
   enabledCategories: ['phones', 'laptops'],
   billingEmail: `billing+${++emailCount}@3chub.com`,

@@ -19,7 +19,7 @@ async function insertStore(overrides: { name?: string; status?: string } = {}) {
     .insert(storesTable)
     .values({
       name: '3C Hub',
-      platform: 'shopify',
+      platform: 'custom',
       publicKey: generatePublicKey(),
       secretKeyHash: hashSecretKey(generateSecretKey()),
       webhookSecret: encryptSecret('whsec_test'),

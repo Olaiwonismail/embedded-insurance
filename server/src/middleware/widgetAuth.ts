@@ -27,22 +27,29 @@ declare global {
   }
 }
 
-// True when the Origin's hostname is a listed domain or a subdomain of one.
-// Matches whole name parts only: 3chub.com allows www.3chub.com but not
-// evil3chub.com or 3chub.com.evil.com.
-export function isAllowedOrigin(origin: string | undefined, allowedDomains: string[]): boolean {
-  if (!origin) return false;
+// The Origin's hostname, or undefined when it is not a usable http(s) origin.
+// Shared with the CORS preflight so both read an Origin the same way.
+export function originHost(origin: string | undefined): string | undefined {
+  if (!origin) return undefined;
 
   let url: URL;
   try {
     url = new URL(origin);
   } catch {
-    return false; // includes the literal "null" origin
+    return undefined; // includes the literal "null" origin
   }
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') return false;
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return undefined;
 
   // URL already lowercases the hostname and drops the port.
   const host = url.hostname.replace(/\.$/, '');
+  return host || undefined;
+}
+
+// True when the Origin's hostname is a listed domain or a subdomain of one.
+// Matches whole name parts only: 3chub.com allows www.3chub.com but not
+// evil3chub.com or 3chub.com.evil.com.
+export function isAllowedOrigin(origin: string | undefined, allowedDomains: string[]): boolean {
+  const host = originHost(origin);
   if (!host) return false;
 
   return allowedDomains.some((domain) => host === domain || host.endsWith(`.${domain}`));
