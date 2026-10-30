@@ -79,6 +79,17 @@ function Check-Env {
     }
   }
 
+  # The api reaches Postgres by its container name. localhost there is the api
+  # container itself, so a DATABASE_URL copied from a non-docker setup never connects.
+  $wanted = "postgres://$(EnvValue 'POSTGRES_USER'):$(EnvValue 'POSTGRES_PASSWORD')@db:5432/$(EnvValue 'POSTGRES_DB')"
+  if ((EnvValue 'DATABASE_URL') -ne $wanted) {
+    $lines = Get-Content $EnvFile | ForEach-Object {
+      if ($_ -match '^\s*DATABASE_URL\s*=') { "DATABASE_URL=$wanted" } else { $_ }
+    }
+    [System.IO.File]::WriteAllText($EnvFile, ($lines -join "`n") + "`n", (New-Object System.Text.UTF8Encoding $false))
+    Write-Host "Set DATABASE_URL in server\.env to the docker database (host db)"
+  }
+
   if ((EnvValue 'ADMIN_API_KEY').Length -lt 32) {
     Die "ADMIN_API_KEY in server\.env is shorter than 32 characters. Delete that line and run again."
   }

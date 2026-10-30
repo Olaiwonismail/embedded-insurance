@@ -35,6 +35,17 @@ check_env() {
   for key in POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB ENCRYPTION_KEY ADMIN_API_KEY DEFAULT_COMMISSION_RATE; do
     [ -n "$(env_value "$key")" ] || die "$key is not set in $ENV_FILE."
   done
+
+  # The api reaches Postgres by its container name. localhost there is the api
+  # container itself, so a DATABASE_URL copied from a non-docker setup never connects.
+  local wanted
+  wanted="postgres://$(env_value POSTGRES_USER):$(env_value POSTGRES_PASSWORD)@db:5432/$(env_value POSTGRES_DB)"
+  if [ "$(env_value DATABASE_URL)" != "$wanted" ]; then
+    grep -vE '^[[:space:]]*DATABASE_URL[[:space:]]*=' "$ENV_FILE" > "$ENV_FILE.tmp" || true
+    printf 'DATABASE_URL=%s\n' "$wanted" >> "$ENV_FILE.tmp"
+    mv "$ENV_FILE.tmp" "$ENV_FILE"
+    echo "Set DATABASE_URL in $ENV_FILE to the docker database (host db)"
+  fi
 }
 
 # The docker database as seen from this machine. The .env copy names the host "db",
