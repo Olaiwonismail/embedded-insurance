@@ -6,7 +6,7 @@
 #   .\demo.ps1 test     every test suite: server, widget, web and end-to-end
 #   .\demo.ps1 stop     stop docker and the test database
 #
-# Needs Docker Desktop (running), Node and npm. Creates server\.env on first run.
+# Needs Docker Desktop (running), Node and npm. Fills in anything server\.env is missing.
 # If Windows refuses to run it: powershell -ExecutionPolicy Bypass -File .\demo.ps1
 
 param([string]$Command = 'start')
@@ -31,39 +31,54 @@ function RandomBytes($count) {
   return , $bytes
 }
 
-# A local-only server\.env with fresh random keys. Written without a byte-order mark
-# and with plain newlines, so dotenv and docker read the first line correctly.
-function New-EnvFile {
-  Say "Creating server\.env"
-  $encryptionKey = [Convert]::ToBase64String((RandomBytes 32))
-  $adminKey = [BitConverter]::ToString((RandomBytes 24)).Replace('-', '').ToLower()
-  $lines = @(
-    '# Local demo values only. Made by demo.ps1.',
-    'POSTGRES_USER=insureongo',
-    'POSTGRES_PASSWORD=insureongo',
-    'POSTGRES_DB=insureongo',
-    'DATABASE_URL=postgres://insureongo:insureongo@db:5432/insureongo',
-    'PORT=3000',
-    "ENCRYPTION_KEY=$encryptionKey",
-    "ADMIN_API_KEY=$adminKey",
-    'DEFAULT_COMMISSION_RATE=0.1'
-  )
-  [System.IO.File]::WriteAllText($EnvFile, ($lines -join "`n") + "`n", (New-Object System.Text.UTF8Encoding $false))
-  Write-Host "Admin page key: $adminKey"
-  Write-Host "(It stays in server\.env if you need it again.)"
-}
-
 # One value from server\.env.
 function EnvValue($key) {
-  $line = Get-Content $EnvFile | Where-Object { $_ -match "^$key=" } | Select-Object -Last 1
+  $line = Get-Content $EnvFile | Where-Object { $_ -match "^\s*$key\s*=" } | Select-Object -Last 1
   if (-not $line) { return '' }
-  return ($line -replace "^$key=", '').Trim().Trim('"', "'")
+  return ($line -replace "^\s*$key\s*=", '').Trim().Trim('"', "'")
 }
 
+# Appends lines to server\.env without a byte-order mark and with plain newlines, so
+# dotenv and docker read every line correctly. Starts a new line first if the file
+# does not end with one.
+function Add-EnvLines($lines) {
+  $text = ''
+  if (Test-Path $EnvFile) {
+    $existing = [System.IO.File]::ReadAllText($EnvFile)
+    if ($existing.Length -gt 0 -and -not $existing.EndsWith("`n")) { $text = "`n" }
+  }
+  $text += ($lines -join "`n") + "`n"
+  [System.IO.File]::AppendAllText($EnvFile, $text, (New-Object System.Text.UTF8Encoding $false))
+}
+
+# Fills in whatever server\.env is missing with local demo values. Values already
+# there are never changed.
 function Check-Env {
-  if (-not (Test-Path $EnvFile)) { New-EnvFile }
-  foreach ($key in 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB', 'ENCRYPTION_KEY', 'ADMIN_API_KEY', 'DEFAULT_COMMISSION_RATE') {
-    if (-not (EnvValue $key)) { Die "$key is not set in server\.env." }
+  if (-not (Test-Path $EnvFile)) { Say "Creating server\.env" }
+
+  $defaults = [ordered]@{
+    POSTGRES_USER           = { 'insureongo' }
+    POSTGRES_PASSWORD       = { 'insureongo' }
+    POSTGRES_DB             = { 'insureongo' }
+    DATABASE_URL            = {
+      "postgres://$(EnvValue 'POSTGRES_USER'):$(EnvValue 'POSTGRES_PASSWORD')@db:5432/$(EnvValue 'POSTGRES_DB')"
+    }
+    PORT                    = { '3000' }
+    ENCRYPTION_KEY          = { [Convert]::ToBase64String((RandomBytes 32)) }
+    ADMIN_API_KEY           = { [BitConverter]::ToString((RandomBytes 24)).Replace('-', '').ToLower() }
+    DEFAULT_COMMISSION_RATE = { '0.1' }
+  }
+
+  foreach ($key in $defaults.Keys) {
+    if (-not (Test-Path $EnvFile) -or -not (EnvValue $key)) {
+      $value = & $defaults[$key]
+      Add-EnvLines @("$key=$value")
+      Write-Host "Added $key to server\.env"
+    }
+  }
+
+  if ((EnvValue 'ADMIN_API_KEY').Length -lt 32) {
+    Die "ADMIN_API_KEY in server\.env is shorter than 32 characters. Delete that line and run again."
   }
 }
 
