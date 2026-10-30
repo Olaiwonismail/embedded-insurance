@@ -10,7 +10,9 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "demo:seed": "tsx scripts/seed-demo.ts",
+    "demo:reset": "tsx scripts/reset-demo.ts"
   },
   "repository": {
     "type": "git",
