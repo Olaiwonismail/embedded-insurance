@@ -136,6 +136,33 @@ export function suspendStore(key: string, id: number): Promise<{ store: StoreDet
   return call(`/v1/admin/stores/${id}/suspend`, { method: 'POST', ...admin(key) });
 }
 
+export interface StoreTotals {
+  policiesSold: number;
+  pendingPolicies: number;
+  premiumTotal: string;
+  commissionTotal: string;
+}
+
+export interface AdminOverview {
+  totals: StoreTotals & { stores: number; activeStores: number; pendingStores: number };
+  stores: (StoreTotals & { id: number; name: string; status: StoreStatus })[];
+}
+
+export function getOverview(key: string): Promise<AdminOverview> {
+  return call('/v1/admin/stores/overview', admin(key));
+}
+
+export interface BillRunResult {
+  billed: number;
+  emailed: number;
+  periodStart: string;
+  periodEnd: string;
+}
+
+export function runWeeklyBill(key: string): Promise<BillRunResult> {
+  return call('/v1/admin/stores/settlements/run', { method: 'POST', ...admin(key) });
+}
+
 // ---- Merchant dashboard: /v1/merchant, uses the session cookie set at signup or sign-in ----
 
 export type MerchantStore = StoreDetails;

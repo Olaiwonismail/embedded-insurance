@@ -219,7 +219,7 @@ export function DashboardPage() {
           </section>
 
           <section className="panel" aria-labelledby="payouts-title">
-            <h2 id="payouts-title">Commission statements</h2>
+            <h2 id="payouts-title">Bills</h2>
             {settlements.length === 0 ? (
               <p className="empty empty--inline">
                 No statements yet. We total your sales and commission{' '}

@@ -13,12 +13,14 @@ import { createWidgetPreflight, allowWidgetOrigin } from './middleware/widgetCor
 
 import { createWebhooksRouter } from './routes/webhooks';
 import { reportError } from './lib/errors';
+import { EmailSender, logOnlyEmailSender } from './lib/email';
 
 // onEventSaved is handed each newly saved webhook_events row id. index.ts uses it to add
-// an issuance job; tests leave it out.
+// an issuance job; tests leave it out. sender is only used by the admin bill-run route.
 export function createApp(
   db: Db,
   onEventSaved: (eventId: number) => void = () => {},
+  sender: EmailSender = logOnlyEmailSender,
 ): Express {
   const app = express();
 
@@ -42,7 +44,7 @@ export function createApp(
   app.use('/health', createHealthRouter(db));
   app.use('/users', usersRoutes);
   app.use('/v1/onboardStores', createOnboardingRouter(db));
-  app.use('/v1/admin/stores', createAdminStoresRouter(db));
+  app.use('/v1/admin/stores', createAdminStoresRouter(db, sender));
   app.use('/v1/merchant', createMerchantRouter(db));
   app.use('/widget', widgetRoutes);
 

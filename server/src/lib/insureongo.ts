@@ -42,22 +42,31 @@ export interface InsureongoClient {
   issuePolicy(input: InsureongoPolicyInput): Promise<InsureongoPolicy>;
 }
 
-// Fake client for development and tests. Always returns two fixed matches,
-// and always issues a one-year policy.
+// What each fake plan charges, as a share of the item's price.
+export const FAKE_BASIC_RATE = 0.06;
+export const FAKE_PREMIUM_RATE = 0.09;
+
+// Kobo as integers, so the result is an exact 2dp string and never a float artefact.
+function shareOf(itemPrice: number, rate: number): string {
+  return (Math.round(itemPrice * rate * 100) / 100).toFixed(2);
+}
+
+// Fake client for development and tests. Always returns two matches, priced off the
+// item so the numbers look like real cover, and always issues a one-year policy.
 export const fakeInsureongoClient: InsureongoClient = {
-  async getQuotes(_item: InsureongoItemInput): Promise<InsureongoMatch[]> {
+  async getQuotes(item: InsureongoItemInput): Promise<InsureongoMatch[]> {
     return [
       {
         quoteId: 'fake-quote-001',
         insurerName: 'Acme Insurance',
         planName: 'Acme Basic Cover',
-        premium: '4.99',
+        premium: shareOf(item.itemPrice, FAKE_BASIC_RATE),
       },
       {
         quoteId: 'fake-quote-002',
         insurerName: 'Shield Underwriters',
         planName: 'Shield Premium Protect',
-        premium: '7.49',
+        premium: shareOf(item.itemPrice, FAKE_PREMIUM_RATE),
       },
     ];
   },

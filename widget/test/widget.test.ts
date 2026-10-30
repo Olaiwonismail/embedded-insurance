@@ -232,7 +232,12 @@ describe('handing the choice to the cart', () => {
     expect(formValues.get(el)).toBe('42');
     expect(changes).toHaveLength(1);
     expect(detailed).toHaveLength(1);
-    expect(detailed[0].detail).toEqual({ quoteId: 42, premium: 54000 });
+    expect(detailed[0].detail).toEqual({
+      quoteId: 42,
+      premium: 54000,
+      planName: 'Screen Protect',
+      insurerName: 'Acme Insurance',
+    });
 
     box.checked = false;
     box.dispatchEvent(new Event('change', { bubbles: true }));

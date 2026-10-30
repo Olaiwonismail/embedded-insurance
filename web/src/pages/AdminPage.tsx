@@ -1,16 +1,20 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 
 import {
+  AdminOverview,
   ApiError,
+  BillRunResult,
   StoreDetails,
   StoreStatus,
   StoreSummary,
   approveStore,
   categoryLabel,
+  getOverview,
   getStore,
   isStandardCategory,
   listStores,
   platformLabel,
+  runWeeklyBill,
   suspendStore,
 } from '../api';
 
@@ -47,6 +51,147 @@ const STATUS_LABEL: Record<StoreStatus, string> = {
 };
 
 type Filter = 'all' | StoreStatus;
+
+// The schema stores amounts without a currency, so none is shown.
+function amount(value: string): string {
+  return Number(value).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function Overview({
+  adminKey,
+  reloadToken,
+  onError,
+}: {
+  adminKey: string;
+  reloadToken: number;
+  onError: (err: unknown) => string;
+}) {
+  const [overview, setOverview] = useState<AdminOverview | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [billing, setBilling] = useState(false);
+  const [billResult, setBillResult] = useState<BillRunResult | null>(null);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      setOverview(await getOverview(adminKey));
+    } catch (err) {
+      setError(onError(err));
+    }
+  }, [adminKey, onError]);
+
+  useEffect(() => {
+    load();
+  }, [load, reloadToken]);
+
+  async function runBill() {
+    setBilling(true);
+    setError(null);
+    setBillResult(null);
+    try {
+      setBillResult(await runWeeklyBill(adminKey));
+      await load();
+    } catch (err) {
+      setError(onError(err));
+    } finally {
+      setBilling(false);
+    }
+  }
+
+  return (
+    <section className="panel" aria-labelledby="overview-title">
+      <h2 id="overview-title">Across all stores</h2>
+
+      {error && (
+        <p className="alert alert--error" role="alert">
+          {error}
+        </p>
+      )}
+
+      {overview === null && !error ? (
+        <p className="muted">Loading totals…</p>
+      ) : (
+        overview && (
+          <>
+            <dl className="totals">
+              <div>
+                <dt>Stores</dt>
+                <dd>
+                  {overview.totals.activeStores} active
+                  {overview.totals.pendingStores > 0 &&
+                    `, ${overview.totals.pendingStores} pending`}
+                </dd>
+              </div>
+              <div>
+                <dt>Policies sold</dt>
+                <dd>{overview.totals.policiesSold}</dd>
+              </div>
+              <div>
+                <dt>Premiums</dt>
+                <dd>{amount(overview.totals.premiumTotal)}</dd>
+              </div>
+              <div className="totals__earned">
+                <dt>Our commission</dt>
+                <dd>{amount(overview.totals.commissionTotal)}</dd>
+              </div>
+            </dl>
+
+            {overview.stores.length > 0 && (
+              <div className="table-wrap">
+                <table className="stores">
+                  <thead>
+                    <tr>
+                      <th scope="col">Store</th>
+                      <th scope="col" className="num">
+                        Policies
+                      </th>
+                      <th scope="col" className="num">
+                        Premiums
+                      </th>
+                      <th scope="col" className="num">
+                        Commission
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overview.stores.map((store) => (
+                      <tr key={store.id}>
+                        <th scope="row">
+                          {store.name} <StatusBadge status={store.status} />
+                        </th>
+                        <td className="num">{store.policiesSold}</td>
+                        <td className="num">{amount(store.premiumTotal)}</td>
+                        <td className="num">{amount(store.commissionTotal)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )
+      )}
+
+      <div className="admin__bar-actions">
+        <button type="button" className="btn btn--small" onClick={runBill} disabled={billing}>
+          {billing ? 'Billing…' : 'Run weekly bill now'}
+        </button>
+        {billResult && (
+          <span className="muted" role="status">
+            {billResult.billed === 0
+              ? 'Nothing new to bill.'
+              : `Billed ${billResult.billed} store${billResult.billed === 1 ? '' : 's'} for ${
+                  billResult.periodStart
+                } to ${billResult.periodEnd}, ${billResult.emailed} emailed.`}
+          </span>
+        )}
+      </div>
+    </section>
+  );
+}
 
 export function AdminPage() {
   const [adminKey, setAdminKey] = useState(readSavedKey);
@@ -135,8 +280,11 @@ function MerchantList({
     [onSignOut],
   );
 
+  const [reloadToken, setReloadToken] = useState(0);
+
   const load = useCallback(async () => {
     setLoadError(null);
+    setReloadToken((token) => token + 1);
     try {
       const { stores } = await listStores(adminKey);
       setStores(stores);
@@ -180,6 +328,8 @@ function MerchantList({
 
       <div className={selectedId ? 'admin__body admin__body--split' : 'admin__body'}>
         <section className="admin__list" aria-label="Stores">
+          <Overview adminKey={adminKey} reloadToken={reloadToken} onError={handleError} />
+
           <div className="filters" role="group" aria-label="Show stores by status">
             {(['all', 'pending', 'active', 'suspended'] as Filter[]).map((f) => (
               <button
@@ -311,9 +461,14 @@ function StoreDetailPanel({
 
   async function act(action: 'approve' | 'suspend') {
     if (!store) return;
+    const rejecting = store.status === 'pending';
     if (
       action === 'suspend' &&
-      !window.confirm(`Suspend ${store.name}? Their checkout widget will stop working straight away.`)
+      !window.confirm(
+        rejecting
+          ? `Reject ${store.name}? They will not be able to take protection on any order.`
+          : `Suspend ${store.name}? Their checkout widget will stop working straight away.`,
+      )
     ) {
       return;
     }
@@ -325,7 +480,11 @@ function StoreDetailPanel({
       const { store: updated } = await run(adminKey, store.id);
       setStore(updated);
       onChanged(updated);
-      setNotice(action === 'approve' ? `${updated.name} approved.` : `${updated.name} suspended.`);
+      setNotice(
+        action === 'approve'
+          ? `${updated.name} approved.`
+          : `${updated.name} ${rejecting ? 'rejected' : 'suspended'}.`,
+      );
     } catch (err) {
       setError(handleError(err));
       // Someone else may have changed it; show the current state.
@@ -435,7 +594,9 @@ function StoreDetailPanel({
                 disabled={busy}
                 onClick={() => act('suspend')}
               >
-                Suspend store
+                {/* Turning down a store that was never live is a rejection, not a
+                    suspension, though both land on the same status. */}
+                {store.status === 'pending' ? 'Reject store' : 'Suspend store'}
               </button>
             )}
             {store.status === 'suspended' && (

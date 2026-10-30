@@ -1,12 +1,18 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { and, desc, eq, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 
 import { Db } from '../db';
-import { storesTable } from '../db/schema';
+import { policiesTable, storesTable } from '../db/schema';
 import { storeColumnsWithoutSecrets } from '../db/storeColumns';
 import { requireAdmin } from '../middleware/adminAuth';
+import { EmailSender } from '../lib/email';
+import { lagosDate, previousWeekBoundary } from '../lib/lagos';
+import { runWeeklySettlement } from '../lib/settlement/weekly';
 
 const MAX_INT = 2_147_483_647;
+
+// Matches the merchant dashboard: paid policies count, unpaid and cancelled ones do not.
+const SOLD = ['active', 'expired'];
 
 // Store ids are positive integers; anything else is a 400, not a database error.
 function parseStoreId(raw: string): number | null {
@@ -15,9 +21,71 @@ function parseStoreId(raw: string): number | null {
   return id >= 1 && id <= MAX_INT ? id : null;
 }
 
-export function createAdminStoresRouter(db: Db): Router {
+export function createAdminStoresRouter(db: Db, sender: EmailSender): Router {
   const router = Router();
   router.use(requireAdmin());
+
+  const isSold = inArray(policiesTable.status, SOLD);
+
+  // Same shape as the merchant dashboard's own totals, widened to every store.
+  // Money stays a string; counts are numbers.
+  const soldTotals = {
+    policiesSold: sql<number>`count(*) filter (where ${isSold})::int`,
+    pendingPolicies: sql<number>`count(*) filter (where ${policiesTable.status} = 'pending')::int`,
+    premiumTotal: sql<string>`coalesce(sum(${policiesTable.premium}) filter (where ${isSold}), 0)::numeric(14, 2)::text`,
+    commissionTotal: sql<string>`coalesce(sum(${policiesTable.commissionAmount}) filter (where ${isSold}), 0)::numeric(14, 2)::text`,
+  };
+
+  router.get('/overview', async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const [[totals], byStore, [storeCounts]] = await Promise.all([
+        db.select(soldTotals).from(policiesTable),
+
+        db
+          .select({
+            id: storesTable.id,
+            name: storesTable.name,
+            status: storesTable.status,
+            ...soldTotals,
+          })
+          .from(storesTable)
+          .leftJoin(policiesTable, eq(policiesTable.storeId, storesTable.id))
+          .groupBy(storesTable.id, storesTable.name, storesTable.status)
+          .orderBy(asc(storesTable.id)),
+
+        db
+          .select({
+            stores: sql<number>`count(*)::int`,
+            activeStores: sql<number>`count(*) filter (where ${storesTable.status} = 'active')::int`,
+            pendingStores: sql<number>`count(*) filter (where ${storesTable.status} = 'pending')::int`,
+          })
+          .from(storesTable),
+      ]);
+
+      res.json({ totals: { ...storeCounts, ...totals }, stores: byStore });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Bills everything unbilled up to now, rather than up to the last Friday the
+  // schedule would use: a demo's policies are minutes old, so a week that already
+  // closed would not include them. Running it twice is safe, because the job stamps
+  // each policy with its settlementId.
+  router.post('/settlements/run', async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const periodEnd = new Date();
+      const result = await runWeeklySettlement(db, sender, periodEnd);
+
+      res.json({
+        ...result,
+        periodStart: lagosDate(previousWeekBoundary(periodEnd)),
+        periodEnd: lagosDate(periodEnd),
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
 
   async function storeExists(id: number): Promise<boolean> {
     const [row] = await db

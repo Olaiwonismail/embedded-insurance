@@ -23,8 +23,12 @@ const quoteId = offer.value;`;
 export const EVENT_EXAMPLE = `const offer = document.querySelector('insureongo-offer');
 
 offer.addEventListener('insureongo:change', (event) => {
-  // { quoteId: 42, premium: 54000 } when ticked, { quoteId: null } when not.
+  // When ticked:
+  //   { quoteId: 42, premium: 54000,
+  //     planName: 'Acme Basic Cover', insurerName: 'Acme Insurance' }
+  // When not: { quoteId: null }
   cart.protectionQuoteId = event.detail.quoteId;
+  cart.protectionPremium = event.detail.premium;
 });
 
 // A plain change event fires too, if that suits your cart better.

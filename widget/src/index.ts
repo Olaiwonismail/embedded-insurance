@@ -255,7 +255,14 @@ class InsureongoOffer extends HTMLElement {
       new CustomEvent('insureongo:change', {
         bubbles: true,
         composed: true,
-        detail: quote ? { quoteId: quote.id, premium: quote.premium } : { quoteId: null },
+        detail: quote
+          ? {
+              quoteId: quote.id,
+              premium: quote.premium,
+              planName: quote.planName,
+              insurerName: quote.insurerName,
+            }
+          : { quoteId: null },
       }),
     );
   }
