@@ -9,16 +9,23 @@ The worker in [`src/lib/issuance/worker.ts`](../src/lib/issuance/worker.ts) turn
 ### What was wrong
 The webhook receiver starts the worker after it saves an event. If the insureOnGo call failed, the event stayed `received`, and nothing ran the worker again until some other webhook arrived. On a quiet store, a paid order could sit without a policy for hours.
 
-### The fix
-`startIssuanceTimer()` runs the worker once at startup and then every 30 seconds (`ISSUANCE_INTERVAL_MS`). It is started in [`src/index.ts`](../src/index.ts).
+A first fix ran the worker on a 30-second timer. That cured the delay but retried a failing event forever, so a permanently broken order was retried every 30 seconds with no end.
 
-- The receiver still starts the worker straight away, so new orders don't wait for the timer.
-- Only one run happens at a time. If the timer fires during a run, one more run is queued after it rather than a second run starting alongside.
-- The timer is `unref()`'d, so it never keeps the process alive by itself.
+### The fix
+Issuance is a BullMQ queue on Redis ([`src/lib/queue/issuance.ts`](../src/lib/queue/issuance.ts)). The timer is gone.
+
+- The receiver adds one job per newly saved event, using the `webhook_events` row id as the job id, so the same event can never be queued twice. A repeated webhook inserts no row, so it queues nothing.
+- Up to **10 attempts**, waiting longer each time, starting at **1 minute** (`MAX_ATTEMPTS`, `FIRST_BACKOFF_MS`).
+- After the last failed attempt the event is marked `failed` with the reason in `error`, for example `gave up after 10 tries: Error`.
+- Up to **5 jobs at once** (`CONCURRENCY`). The existing `pending` policy claim on `issuanceKey` already stops two workers issuing the same order.
+- A sweep every **10 minutes** queues any paid-order event still `received` after **5 minutes**, covering a job that was never added or was lost. The job id makes this safe to run as often as we like.
+
+Schedules live in [`src/lib/queue/schedules.ts`](../src/lib/queue/schedules.ts), the only file that knows when things run. The weekly bill (Friday 08:00) and the quote cleanup (daily 03:00) are scheduled there too, both on `Africa/Lagos`. The job functions themselves take no interest in queues or clocks.
+
+Redis comes from `REDIS_URL`. `REDIS_PREFIX` namespaces the keys so one Redis can carry more than one environment.
 
 ### Still open
-- **No retry limit or delay.** An event that keeps failing is retried every 30 seconds with no end. The brief left limits and backoff out of scope.
-- **Long term:** the roadmap's BullMQ queue (Day 13) gives retries with growing delays and a final "failed" state. When that lands, it replaces this timer.
+- **Nothing watches the `failed` pile.** An event that gives up after 10 tries needs someone to look. Alerting on it is part of the monitoring work.
 
 ---
 
@@ -58,9 +65,17 @@ To stop insureOnGo issuing two real policies, the call now sends `issuanceKey`, 
 ---
 
 ## Tests
-All in [`test/issuance.test.ts`](../test/issuance.test.ts):
 
-- `the timer picks up events with no new webhook`
+Queue behaviour, against a real Redis, in [`test/queue.test.ts`](../test/queue.test.ts):
+
+- `adds one job per saved event and refuses a duplicate`
+- `issues one policy when insureOnGo fails three times then succeeds`
+- `tries ten times then marks the event failed with a reason`
+- `queues an event left received with no job` and `leaves a freshly received event alone`
+- `registers the weekly bill, the cleanup and the sweep on Lagos time`
+
+Issuance behaviour in [`test/issuance.test.ts`](../test/issuance.test.ts):
+
 - `holds no transaction or row locks while insureOnGo is called`: inside the insureOnGo call, it locks the quote and event rows from another connection with `NOWAIT` (which errors at once if a lock is held), and checks that the pending policy is already visible.
 - `picks up a pending policy left by a crash and finishes it`
 - `fails a second order for a quote that already has a pending policy`

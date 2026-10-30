@@ -1,7 +1,7 @@
 import express, { Express, Request, Response, NextFunction } from 'express';
 
 import { Db } from './db';
-import healthRoutes from './routes/health';
+import { createHealthRouter } from './routes/health';
 import usersRoutes from './routes/users';
 import { createOnboardingRouter } from './routes/onboarding';
 import { createAdminStoresRouter } from './routes/adminStores';
@@ -12,10 +12,14 @@ import { createWidgetAuth } from './middleware/widgetAuth';
 import { createWidgetPreflight, allowWidgetOrigin } from './middleware/widgetCors';
 
 import { createWebhooksRouter } from './routes/webhooks';
-import { InsureongoClient, fakeInsureongoClient } from './lib/insureongo';
-import { startIssuanceWorker } from './lib/issuance/worker';
+import { reportError } from './lib/errors';
 
-export function createApp(db: Db, insureongo: InsureongoClient = fakeInsureongoClient): Express {
+// onEventSaved is handed each newly saved webhook_events row id. index.ts uses it to add
+// an issuance job; tests leave it out.
+export function createApp(
+  db: Db,
+  onEventSaved: (eventId: number) => void = () => {},
+): Express {
   const app = express();
 
   // Behind a proxy (the web container's nginx), every request comes from the proxy,
@@ -26,8 +30,8 @@ export function createApp(db: Db, insureongo: InsureongoClient = fakeInsureongoC
   }
 
   // Webhook signatures require exact raw bytes; mounted before express.json()
-  // Each saved event starts the policy issuance worker in the background
-  app.use('/v1/webhooks', createWebhooksRouter(db, () => startIssuanceWorker(db, insureongo)));
+  // Each newly saved event is queued for policy issuance.
+  app.use('/v1/webhooks', createWebhooksRouter(db, onEventSaved));
 
   app.use(express.json());
 
@@ -35,7 +39,7 @@ export function createApp(db: Db, insureongo: InsureongoClient = fakeInsureongoC
     res.send('Hello, World!');
   });
 
-  app.use('/health', healthRoutes);
+  app.use('/health', createHealthRouter(db));
   app.use('/users', usersRoutes);
   app.use('/v1/onboardStores', createOnboardingRouter(db));
   app.use('/v1/admin/stores', createAdminStoresRouter(db));
@@ -60,6 +64,7 @@ export function createApp(db: Db, insureongo: InsureongoClient = fakeInsureongoC
       return;
     }
     console.error('Unhandled error:', err?.name, err?.code ?? err?.cause?.code ?? '');
+    reportError(err);
     res.status(500).json({ error: 'Internal server error' });
   });
 

@@ -13,7 +13,7 @@ import {
   webhookEventsTable,
 } from '../src/db/schema';
 import { InsureongoClient, fakeInsureongoClient } from '../src/lib/insureongo';
-import { commissionFor, runIssuanceWorker, startIssuanceTimer } from '../src/lib/issuance/worker';
+import { commissionFor, runIssuanceWorker } from '../src/lib/issuance/worker';
 import { generatePublicKey, generateSecretKey, hashSecretKey } from '../src/lib/keys';
 import { encryptSecret } from '../src/lib/secrets';
 import { TEST_DATABASE_URL } from './global-setup';
@@ -315,28 +315,33 @@ describe('policy issuance worker', () => {
     expect(policies.every((p) => p.customerId === customers[0].id)).toBe(true);
   });
 
-  it('is started by the webhook receiver after it saves an event', async () => {
+  // The receiver no longer issues anything itself; it hands the new row id over to be
+  // queued. What the queue then does with it is covered in test/queue.test.ts.
+  it('hands each newly saved event id over once, and nothing on a repeat', async () => {
     const store = await insertStore();
     const quote = await insertQuote(store.id);
     const body = JSON.stringify(customBody(quote.id));
     const signature = crypto.createHmac('sha256', 'whsec_test').update(body).digest('hex');
 
-    const res = await request(createApp(db))
-      .post(`/v1/webhooks/custom/${store.publicKey}`)
-      .set('Content-Type', 'application/json')
-      .set('X-InsureOnGo-Signature', signature)
-      .set('X-InsureOnGo-Timestamp', String(Math.floor(Date.now() / 1000)))
-      .send(body);
-    expect(res.status).toBe(200);
+    const queued: number[] = [];
+    const app = createApp(db, (eventId) => queued.push(eventId));
+    const send = () =>
+      request(app)
+        .post(`/v1/webhooks/custom/${store.publicKey}`)
+        .set('Content-Type', 'application/json')
+        .set('X-InsureOnGo-Signature', signature)
+        .set('X-InsureOnGo-Timestamp', String(Math.floor(Date.now() / 1000)))
+        .send(body);
 
-    // A pending policy shows up first, so wait for the event to finish
-    await vi.waitFor(async () => {
-      const [event] = await db.select().from(webhookEventsTable);
-      expect(event.status).toBe('processed');
-    });
-    const policies = await db.select().from(policiesTable);
-    expect(policies).toHaveLength(1);
-    expect(policies[0].status).toBe('active');
+    expect((await send()).status).toBe(200);
+
+    const [event] = await db.select().from(webhookEventsTable);
+    expect(queued).toEqual([event.id]);
+
+    // The same eventId saves no second row, so there is nothing new to queue.
+    expect((await send()).status).toBe(200);
+    expect(await db.select().from(webhookEventsTable)).toHaveLength(1);
+    expect(queued).toEqual([event.id]);
   });
 
   it('holds no transaction or row locks while insureOnGo is called', async () => {
@@ -438,25 +443,6 @@ describe('policy issuance worker', () => {
     expect(saved.status).toBe('failed');
     expect(saved.error).toMatch(/already used/);
     expect(await db.select().from(policiesTable)).toHaveLength(1);
-  });
-
-  it('the timer picks up events with no new webhook', async () => {
-    const store = await insertStore();
-    const quote = await insertQuote(store.id);
-
-    const stop = startIssuanceTimer(db, fakeInsureongoClient, 50);
-    try {
-      // Saved after the first run, so only a later tick can handle it
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      const event = await insertEvent(store.id, 'order.paid', customBody(quote.id));
-
-      await vi.waitFor(async () => {
-        expect((await getEvent(event.id)).status).toBe('processed');
-      });
-      expect(await db.select().from(policiesTable)).toHaveLength(1);
-    } finally {
-      stop();
-    }
   });
 
   it('ignores events that are not paid orders', async () => {

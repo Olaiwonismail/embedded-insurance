@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  TEST_DATABASE_URL: postgres://postgres:test@localhost:55432/insurance_test
+  REDIS_URL: redis://127.0.0.1:6379
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: insurance_test
+        # The test suite expects 55432, so map it here rather than changing the default.
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d insurance_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        run: |
+          npm install
+          npm install --prefix server
+          npm install --prefix web
+          npm install --prefix widget
+
+      # A migration that does not apply to an empty database fails the run here,
+      # before any test gets the chance to paper over it.
+      - name: Apply migrations to an empty database
+        working-directory: server
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+        run: npm run db:migrate
+
+      - name: Typecheck
+        run: |
+          npm run typecheck --prefix server
+          npm run typecheck --prefix web
+          npm run typecheck --prefix widget
+
+      - name: Widget tests
+        run: npm test --prefix widget
+
+      - name: Widget build
+        run: npm run build --prefix widget
+
+      - name: Web tests
+        run: npm test --prefix web
+
+      - name: Server tests
+        run: npm test --prefix server
+
+      - name: Install browsers for the end-to-end test
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end test
+        run: npm run test:e2e

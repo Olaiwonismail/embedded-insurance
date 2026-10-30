@@ -223,15 +223,15 @@ export function DashboardPage() {
             {settlements.length === 0 ? (
               <p className="empty empty--inline">
                 No statements yet. We total your sales and commission{' '}
-                {store.settlementFrequency === 'daily' ? 'at the end of each day' : 'each period'} you
-                sell cover.
+                {store.settlementFrequency === 'weekly' ? 'every Friday' : 'each period'} you sell
+                cover.
               </p>
             ) : (
               <div className="table-wrap">
                 <table className="stores">
                   <thead>
                     <tr>
-                      <th scope="col">Date</th>
+                      <th scope="col">Week</th>
                       <th scope="col" className="num">Policies</th>
                       <th scope="col" className="num">Premiums</th>
                       <th scope="col" className="num">Commission</th>
@@ -242,7 +242,8 @@ export function DashboardPage() {
                     {settlements.map((s) => (
                       <tr key={s.id}>
                         <th scope="row" className="nowrap">
-                          {dateFormat.format(new Date(`${s.settlementDate}T00:00:00`))}
+                          {dateFormat.format(new Date(`${s.periodStart}T00:00:00`))} &ndash;{' '}
+                          {dateFormat.format(new Date(`${s.periodEnd}T00:00:00`))}
                         </th>
                         <td className="num">{s.policyCount}</td>
                         <td className="num">{amount(s.premiumTotal)}</td>
@@ -288,6 +289,10 @@ export function DashboardPage() {
             value={store.publicKey}
             hint="Goes in your checkout widget."
           />
+
+          <p>
+            <a href="/setup">How to connect your store</a>
+          </p>
 
           <dl className="facts">
             <dt>Platform</dt>

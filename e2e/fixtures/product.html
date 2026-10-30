@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>iPhone 15</title>
+    <script src="http://localhost:3100/widget/v1/insureongo.js" defer></script>
+  </head>
+  <body>
+    <h1>iPhone 15</h1>
+
+    <form id="cart">
+      <insureongo-offer
+        id="offer"
+        item-name="iPhone 15"
+        item-category="phones"
+        item-price="900000"
+        item-condition="new"
+        store-item-ref="SKU-123"
+      ></insureongo-offer>
+      <button type="submit">Add to cart</button>
+    </form>
+
+    <script>
+      // Runs while parsing, so the attribute is in place before the deferred widget
+      // script defines the element and upgrades it.
+      const key = new URLSearchParams(location.search).get('pk');
+      if (key) document.getElementById('offer').setAttribute('public-key', key);
+    </script>
+  </body>
+</html>

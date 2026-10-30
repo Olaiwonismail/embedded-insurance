@@ -6,8 +6,12 @@ import { storesTable, webhookEventsTable } from '../db/schema';
 import { decryptSecret } from '../lib/secrets';
 import { getPlatformVerifier, WebhookValidationError } from '../lib/webhooks';
 
-// onEventSaved runs after each insert and must not block; app.ts uses it to start the issuance worker.
-export function createWebhooksRouter(db: Db, onEventSaved: () => void = () => {}): Router {
+// onEventSaved runs after each new row is inserted and must not block; app.ts uses it to
+// queue the event for policy issuance.
+export function createWebhooksRouter(
+  db: Db,
+  onEventSaved: (eventId: number) => void = () => {},
+): Router {
   const router = Router();
 
   // Raw body captured at route level before any JSON parser rewrites it
@@ -75,7 +79,7 @@ export function createWebhooksRouter(db: Db, onEventSaved: () => void = () => {}
 
       // 6. Insert into webhook_events with storeId, eventId, type, payload, and status: "received".
       // On a conflict with the unique index (storeId, eventId), do nothing. This makes repeats harmless.
-      await db
+      const [saved] = await db
         .insert(webhookEventsTable)
         .values({
           storeId: store.id,
@@ -84,9 +88,11 @@ export function createWebhooksRouter(db: Db, onEventSaved: () => void = () => {}
           payload: eventData.payload,
           status: 'received',
         })
-        .onConflictDoNothing();
+        .onConflictDoNothing()
+        .returning({ id: webhookEventsTable.id });
 
-      onEventSaved();
+      // A repeat inserts nothing, so there is no new row to queue.
+      if (saved) onEventSaved(saved.id);
 
       // 7. Respond 200 within a few hundred milliseconds. Do no more work on this request.
       res.status(200).json({ ok: true });

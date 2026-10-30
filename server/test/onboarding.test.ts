@@ -71,7 +71,7 @@ describe('POST /v1/onboardStores', () => {
 
     const row = await findStore(res.body.id);
     expect(row.status).toBe('pending');
-    expect(row.settlementFrequency).toBe('daily');
+    expect(row.settlementFrequency).toBe('weekly');
     expect(row.publicKey).toBe(res.body.publicKey);
   });
 

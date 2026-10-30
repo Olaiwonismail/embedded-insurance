@@ -223,8 +223,8 @@ describe('merchant dashboard API', () => {
       await insertPolicy(other.id, 'active', '99999.00', 'B1');
 
       await db.insert(settlementsTable).values([
-        { storeId: mine.id, settlementDate: '2026-10-10', policyCount: 2, premiumTotal: '30000.00', commissionTotal: '3000.00' },
-        { storeId: other.id, settlementDate: '2026-10-10', policyCount: 1, premiumTotal: '99999.00', commissionTotal: '9999.90' },
+        { storeId: mine.id, periodStart: '2026-10-09', periodEnd: '2026-10-16', policyCount: 2, premiumTotal: '30000.00', commissionTotal: '3000.00' },
+        { storeId: other.id, periodStart: '2026-10-09', periodEnd: '2026-10-16', policyCount: 1, premiumTotal: '99999.00', commissionTotal: '9999.90' },
       ]);
       await db.insert(webhookEventsTable).values([
         { storeId: mine.id, eventId: 'evt_mine', type: 'orders/paid', payload: { customer: 'secret' } },

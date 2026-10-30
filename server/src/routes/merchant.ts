@@ -142,7 +142,8 @@ export function createMerchantRouter(db: Db): Router {
         db
           .select({
             id: settlementsTable.id,
-            settlementDate: settlementsTable.settlementDate,
+            periodStart: settlementsTable.periodStart,
+            periodEnd: settlementsTable.periodEnd,
             policyCount: settlementsTable.policyCount,
             premiumTotal: settlementsTable.premiumTotal,
             commissionTotal: settlementsTable.commissionTotal,
@@ -150,7 +151,7 @@ export function createMerchantRouter(db: Db): Router {
           })
           .from(settlementsTable)
           .where(eq(settlementsTable.storeId, storeId))
-          .orderBy(desc(settlementsTable.settlementDate))
+          .orderBy(desc(settlementsTable.periodStart))
           .limit(RECENT_LIMIT),
 
         // The event payload is left out: it can hold customer details.

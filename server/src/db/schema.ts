@@ -24,7 +24,7 @@ export const storesTable = pgTable("stores", {
   allowedDomains: text().array().notNull().default(sql`'{}'::text[]`),
 
   commissionRate: numeric({ precision: 5, scale: 4 }).notNull(),
-  settlementFrequency: varchar({ length: 20 }).notNull().default("daily"),
+  settlementFrequency: varchar({ length: 20 }).notNull().default("weekly"),
   billingEmail: varchar({ length: 255 }).notNull(),
 
   enabledCategories: text().array().notNull().default(sql`'{}'::text[]`),
@@ -107,8 +107,9 @@ export const webhookEventsTable = pgTable(
   (t) => [uniqueIndex("webhook_events_store_event_uq").on(t.storeId, t.eventId)],
 );
 
-// One row per store per day. Totals are worked out from policies when the daily job runs,
-// then frozen here so the invoice never changes afterwards.
+// One row per store per billing week, Friday 00:00 to the next Friday 00:00 Lagos time.
+// Totals are worked out from policies when the weekly job runs, then frozen here so the
+// bill never changes afterwards.
 export const settlementsTable = pgTable(
   "settlements",
   {
@@ -116,14 +117,16 @@ export const settlementsTable = pgTable(
     storeId: integer()
       .notNull()
       .references(() => storesTable.id),
-    settlementDate: date().notNull(),
+    periodStart: date().notNull(),
+    periodEnd: date().notNull(),
     policyCount: integer().notNull(),
     premiumTotal: numeric({ precision: 14, scale: 2 }).notNull(),
     commissionTotal: numeric({ precision: 14, scale: 2 }).notNull(),
     status: varchar({ length: 20 }).notNull().default("pending"), // pending, invoiced, paid
+    sentAt: timestamp(), // when the bill email went out; null means it still has to
     createdAt: timestamp().notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("settlements_store_date_uq").on(t.storeId, t.settlementDate)],
+  (t) => [uniqueIndex("settlements_store_period_uq").on(t.storeId, t.periodStart)],
 );
 
 // Issued cover. Active only once the premium is paid.

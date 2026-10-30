@@ -1,18 +1,22 @@
 services:
   api:
-    build: 
-      context: server
-      dockerfile: Dockerfile
+    # The root, so the build can also bundle the widget the API serves.
+    build:
+      context: .
+      dockerfile: server/Dockerfile
     env_file:
       - ./server/.env
     environment:
       # Requests arrive through the web container's nginx; read the visitor's
       # address from it so the signup rate limit is per visitor, not shared.
       TRUST_PROXY: uniquelocal
+      REDIS_URL: redis://redis:6379
     ports:
       - "3000:3000"
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   # Signup and admin pages, served by nginx. Forwards /v1 to the api service.
@@ -24,6 +28,16 @@ services:
       - "8080:80"
     depends_on:
       - api
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   db:
     image: postgres:16

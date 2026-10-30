@@ -22,9 +22,6 @@ import { PAID_ORDER_PLATFORMS } from './orders';
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
-// How often the timer looks for events still "received" (new, or left by a failed call).
-export const ISSUANCE_INTERVAL_MS = 30_000;
-
 // premium (2dp) * rate, rounded half-up to 2dp. Exact decimal math, no floats.
 export function commissionFor(premium: string, rate: string): string {
   const toScaled = (value: string, scale: number): bigint => {
@@ -37,7 +34,7 @@ export function commissionFor(premium: string, rate: string): string {
   return `${str.slice(0, -2)}.${str.slice(-2)}`;
 }
 
-function paidOrderCondition() {
+export function paidOrderCondition() {
   return or(
     ...Object.entries(PAID_ORDER_PLATFORMS).map(([platform, { type }]) =>
       and(eq(storesTable.platform, platform), eq(webhookEventsTable.type, type)),
@@ -325,41 +322,3 @@ export async function runIssuanceWorker(db: Db, client: InsureongoClient): Promi
   }
 }
 
-// Starts a run in the background without waiting for it. Only one run at a time;
-// a start during a run asks for one more run afterwards, so no new event is missed.
-let running = false;
-let runAgain = false;
-
-export function startIssuanceWorker(db: Db, client: InsureongoClient): void {
-  if (running) {
-    runAgain = true;
-    return;
-  }
-  running = true;
-
-  void (async () => {
-    try {
-      do {
-        runAgain = false;
-        await runIssuanceWorker(db, client);
-      } while (runAgain);
-    } catch (err: any) {
-      console.error('Policy issuance worker failed:', err?.name, err?.code ?? err?.cause?.code ?? '');
-    } finally {
-      running = false;
-    }
-  })();
-}
-
-// Runs the worker now and then every intervalMs, so events left "received"
-// are retried even when no new webhook arrives. Returns a function that stops it.
-export function startIssuanceTimer(
-  db: Db,
-  client: InsureongoClient,
-  intervalMs: number = ISSUANCE_INTERVAL_MS,
-): () => void {
-  startIssuanceWorker(db, client);
-  const timer = setInterval(() => startIssuanceWorker(db, client), intervalMs);
-  timer.unref(); // don't keep the process alive just for this
-  return () => clearInterval(timer);
-}

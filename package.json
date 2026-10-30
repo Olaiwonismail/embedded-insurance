@@ -1,9 +1,14 @@
 {
+  "scripts": {
+    "test:e2e": "playwright test"
+  },
   "dependencies": {
     "dotenv": "^18.0.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@types/node": "^26.6.4",
+    "pg": "^8.23.1",
     "vitest": "^5.0.4"
   }
 }

@@ -117,7 +117,7 @@ export function createOnboardingRouter(db: Db): Router {
         passwordHash: await hashPassword(input.password),
         status: 'pending',
         commissionRate: getDefaultCommissionRate(),
-        settlementFrequency: 'daily',
+        settlementFrequency: 'weekly',
       };
 
       const insertStore = () =>

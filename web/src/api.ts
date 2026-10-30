@@ -161,7 +161,8 @@ export interface Activity {
   }[];
   settlements: {
     id: number;
-    settlementDate: string;
+    periodStart: string;
+    periodEnd: string;
     policyCount: number;
     premiumTotal: string;
     commissionTotal: string;
