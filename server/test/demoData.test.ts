@@ -101,18 +101,19 @@ afterAll(async () => {
 });
 
 describe('assertLocalDatabase', () => {
-  it('accepts localhost and 127.0.0.1', () => {
+  it('accepts localhost, 127.0.0.1 and the docker compose database', () => {
     expect(assertLocalDatabase('postgres://u:p@localhost:5432/db')).toBe(
       'postgres://u:p@localhost:5432/db',
     );
     expect(() => assertLocalDatabase('postgres://u:p@127.0.0.1:5432/db')).not.toThrow();
+    expect(() => assertLocalDatabase('postgres://u:p@db:5432/db')).not.toThrow();
   });
 
   it('refuses any other host, and a missing or broken URL', () => {
     expect(() => assertLocalDatabase('postgres://u:p@db.prod.internal:5432/db')).toThrow(
       /Refusing/,
     );
-    expect(() => assertLocalDatabase('postgres://u:p@db:5432/db')).toThrow(/Refusing/);
+    expect(() => assertLocalDatabase('postgres://u:p@db.example.com:5432/db')).toThrow(/Refusing/);
     expect(() => assertLocalDatabase(undefined)).toThrow(/not set/);
     expect(() => assertLocalDatabase('not a url')).toThrow(/not a valid URL/);
   });

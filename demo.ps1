@@ -95,15 +95,6 @@ function Check-Env {
   }
 }
 
-# The docker database as seen from this machine. The .env copy names the host "db",
-# which only works inside docker, and the demo scripts refuse anything not local.
-function LocalDatabaseUrl {
-  $user = [Uri]::EscapeDataString((EnvValue 'POSTGRES_USER'))
-  $pass = [Uri]::EscapeDataString((EnvValue 'POSTGRES_PASSWORD'))
-  $db = [Uri]::EscapeDataString((EnvValue 'POSTGRES_DB'))
-  return "postgres://${user}:${pass}@localhost:5432/$db"
-}
-
 function Install-Deps {
   Say "Installing dependencies"
   foreach ($dir in '.', 'server', 'web', 'widget', 'demo-store') {
@@ -125,19 +116,22 @@ function Wait-ForApi {
   Die "The API did not answer $ApiHealth within 2 minutes. Check: docker compose logs api"
 }
 
-function With-LocalDatabase([scriptblock]$Block) {
-  $env:DATABASE_URL = LocalDatabaseUrl
-  try { & $Block } finally { Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue }
+# Runs inside the api container, where DATABASE_URL already points at the docker
+# database. From this machine, localhost:5432 can reach another Postgres installed on
+# Windows instead.
+function In-Api([string]$What, [string[]]$Cmd) {
+  docker compose exec -T api @Cmd
+  Check $What
 }
 
 function Migrate {
   Say "Applying migrations"
-  With-LocalDatabase { npm run --silent db:migrate --prefix server; Check 'migrations' }
+  In-Api 'migrations' @('npm', 'run', '--silent', 'db:migrate')
 }
 
 function Reset-Data {
   Say "Resetting demo data"
-  With-LocalDatabase { npm run --silent demo:reset --prefix server; Check 'demo:reset' }
+  In-Api 'demo:reset (is docker running? .\demo.ps1 start)' @('npm', 'run', '--silent', 'demo:reset')
 
   # The shop keeps its orders in a file. If it is running, ask it to clear them so its
   # memory and the file agree; otherwise remove the file.

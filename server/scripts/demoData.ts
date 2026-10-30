@@ -22,7 +22,8 @@ import { encryptSecret } from '../src/lib/secrets';
 export const SEED_EMAIL_DOMAIN = 'seed.demo';
 export const DEMO_STORE_NAME = 'Demo Gadgets';
 
-const LOCAL_HOSTS = ['localhost', '127.0.0.1'];
+// "db" is the docker compose database, for when the scripts run inside the api container.
+const LOCAL_HOSTS = ['localhost', '127.0.0.1', 'db'];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Refuses anything but a database on this machine, so a production DATABASE_URL
@@ -40,7 +41,7 @@ export function assertLocalDatabase(url: string | undefined): string {
   if (!LOCAL_HOSTS.includes(host)) {
     throw new Error(
       `Refusing to touch the database at "${host}". The demo scripts only run against ` +
-        `localhost or 127.0.0.1, for example ` +
+        `localhost, 127.0.0.1 or the docker compose database "db", for example ` +
         `DATABASE_URL=postgres://user:pass@localhost:5432/insurance`,
     );
   }

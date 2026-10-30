@@ -48,13 +48,10 @@ check_env() {
   fi
 }
 
-# The docker database as seen from this machine. The .env copy names the host "db",
-# which only works inside docker, and the demo scripts refuse anything not local.
-local_database_url() {
-  # Encoded, so a password with @ or / in it still makes a valid URL.
-  node -e 'const [u, p, d] = process.argv.slice(1).map(encodeURIComponent);
-    process.stdout.write(`postgres://${u}:${p}@localhost:5432/${d}`)' \
-    "$(env_value POSTGRES_USER)" "$(env_value POSTGRES_PASSWORD)" "$(env_value POSTGRES_DB)"
+# Runs inside the api container, where DATABASE_URL already points at the docker
+# database. From this machine, localhost:5432 can reach another Postgres instead.
+in_api() {
+  docker compose exec -T api "$@"
 }
 
 install_deps() {
@@ -82,12 +79,12 @@ wait_for_api() {
 
 migrate() {
   say "Applying migrations"
-  DATABASE_URL="$(local_database_url)" npm run --silent db:migrate --prefix server
+  in_api npm run --silent db:migrate
 }
 
 reset_data() {
   say "Resetting demo data"
-  DATABASE_URL="$(local_database_url)" npm run --silent demo:reset --prefix server
+  in_api npm run --silent demo:reset || die "demo:reset failed. Is docker running? ./demo.sh start"
 
   # The shop keeps its orders in a file. If it is running, ask it to clear them so its
   # memory and the file agree; otherwise remove the file.

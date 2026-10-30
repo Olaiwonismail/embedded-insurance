@@ -1,0 +1,9 @@
+# The api image is built from the repository root (see server/Dockerfile).
+# Installed packages come from npm inside the image; copies from the host are for the
+# wrong platform on Windows and macOS.
+**/node_modules
+**/dist
+**/.env
+.git
+test-results
+demo-store/data
