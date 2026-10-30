@@ -144,7 +144,8 @@ function Start-Demo {
   Install-Deps
 
   Say "Building and starting docker (api, web, postgres, redis)"
-  docker compose up --build -d; Check 'docker compose up'
+  # Recreated every time, so a changed server\.env is always picked up.
+  docker compose up --build --force-recreate -d; Check 'docker compose up'
 
   Wait-ForApi
   Migrate

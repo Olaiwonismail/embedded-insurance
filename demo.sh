@@ -93,7 +93,8 @@ cmd_start() {
   install_deps
 
   say "Building and starting docker (api, web, postgres, redis)"
-  docker compose up --build -d
+  # Recreated every time, so a changed server/.env is always picked up.
+  docker compose up --build --force-recreate -d
 
   wait_for_api
   migrate
