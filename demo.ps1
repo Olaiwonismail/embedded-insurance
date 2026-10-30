@@ -1,0 +1,195 @@
+# Runs the demo end to end on Windows. The same steps as demo.sh.
+#
+#   .\demo.ps1          same as start
+#   .\demo.ps1 start    build and start docker, migrate, reset the demo data, run the shop
+#   .\demo.ps1 reset    wipe the demo data and the shop's orders, then seed again
+#   .\demo.ps1 test     every test suite: server, widget, web and end-to-end
+#   .\demo.ps1 stop     stop docker and the test database
+#
+# Needs Docker Desktop (running), Node and npm. Creates server\.env on first run.
+# If Windows refuses to run it: powershell -ExecutionPolicy Bypass -File .\demo.ps1
+
+param([string]$Command = 'start')
+
+$ErrorActionPreference = 'Stop'
+Set-Location $PSScriptRoot
+
+$EnvFile = Join-Path $PSScriptRoot 'server\.env'
+$ShopUrl = 'http://127.0.0.1:4174'
+$ApiHealth = 'http://localhost:3000/health'
+$TestDbContainer = 'insureongo-test-db'
+
+function Say($text) { Write-Host "`n==> $text" -ForegroundColor Cyan }
+function Die($text) { Write-Host $text -ForegroundColor Red; exit 1 }
+
+# Call after each program: PowerShell does not stop on its own when one fails.
+function Check($what) { if ($LASTEXITCODE -ne 0) { Die "Failed: $what" } }
+
+function RandomBytes($count) {
+  $bytes = New-Object byte[] $count
+  [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+  return , $bytes
+}
+
+# A local-only server\.env with fresh random keys. Written without a byte-order mark
+# and with plain newlines, so dotenv and docker read the first line correctly.
+function New-EnvFile {
+  Say "Creating server\.env"
+  $encryptionKey = [Convert]::ToBase64String((RandomBytes 32))
+  $adminKey = [BitConverter]::ToString((RandomBytes 24)).Replace('-', '').ToLower()
+  $lines = @(
+    '# Local demo values only. Made by demo.ps1.',
+    'POSTGRES_USER=insureongo',
+    'POSTGRES_PASSWORD=insureongo',
+    'POSTGRES_DB=insureongo',
+    'DATABASE_URL=postgres://insureongo:insureongo@db:5432/insureongo',
+    'PORT=3000',
+    "ENCRYPTION_KEY=$encryptionKey",
+    "ADMIN_API_KEY=$adminKey",
+    'DEFAULT_COMMISSION_RATE=0.1'
+  )
+  [System.IO.File]::WriteAllText($EnvFile, ($lines -join "`n") + "`n", (New-Object System.Text.UTF8Encoding $false))
+  Write-Host "Admin page key: $adminKey"
+  Write-Host "(It stays in server\.env if you need it again.)"
+}
+
+# One value from server\.env.
+function EnvValue($key) {
+  $line = Get-Content $EnvFile | Where-Object { $_ -match "^$key=" } | Select-Object -Last 1
+  if (-not $line) { return '' }
+  return ($line -replace "^$key=", '').Trim().Trim('"', "'")
+}
+
+function Check-Env {
+  if (-not (Test-Path $EnvFile)) { New-EnvFile }
+  foreach ($key in 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB', 'ENCRYPTION_KEY', 'ADMIN_API_KEY', 'DEFAULT_COMMISSION_RATE') {
+    if (-not (EnvValue $key)) { Die "$key is not set in server\.env." }
+  }
+}
+
+# The docker database as seen from this machine. The .env copy names the host "db",
+# which only works inside docker, and the demo scripts refuse anything not local.
+function LocalDatabaseUrl {
+  $user = [Uri]::EscapeDataString((EnvValue 'POSTGRES_USER'))
+  $pass = [Uri]::EscapeDataString((EnvValue 'POSTGRES_PASSWORD'))
+  $db = [Uri]::EscapeDataString((EnvValue 'POSTGRES_DB'))
+  return "postgres://${user}:${pass}@localhost:5432/$db"
+}
+
+function Install-Deps {
+  Say "Installing dependencies"
+  foreach ($dir in '.', 'server', 'web', 'widget', 'demo-store') {
+    if (-not (Test-Path (Join-Path $dir 'node_modules'))) {
+      npm ci --prefix $dir; Check "npm ci in $dir"
+    }
+  }
+}
+
+function Wait-ForApi {
+  Say "Waiting for the API"
+  for ($i = 0; $i -lt 60; $i++) {
+    try {
+      Invoke-WebRequest -UseBasicParsing -Uri $ApiHealth -TimeoutSec 3 | Out-Null
+      Write-Host "API is up."
+      return
+    } catch { Start-Sleep -Seconds 2 }
+  }
+  Die "The API did not answer $ApiHealth within 2 minutes. Check: docker compose logs api"
+}
+
+function With-LocalDatabase([scriptblock]$Block) {
+  $env:DATABASE_URL = LocalDatabaseUrl
+  try { & $Block } finally { Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue }
+}
+
+function Migrate {
+  Say "Applying migrations"
+  With-LocalDatabase { npm run --silent db:migrate --prefix server; Check 'migrations' }
+}
+
+function Reset-Data {
+  Say "Resetting demo data"
+  With-LocalDatabase { npm run --silent demo:reset --prefix server; Check 'demo:reset' }
+
+  # The shop keeps its orders in a file. If it is running, ask it to clear them so its
+  # memory and the file agree; otherwise remove the file.
+  try {
+    Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$ShopUrl/reset" -TimeoutSec 3 | Out-Null
+    Write-Host "Cleared the shop's orders."
+  } catch {
+    Remove-Item 'demo-store\data\state.json' -ErrorAction SilentlyContinue
+    Write-Host "Cleared the shop's saved state."
+  }
+}
+
+function Start-Demo {
+  Check-Env
+  Install-Deps
+
+  Say "Building and starting docker (api, web, postgres, redis)"
+  docker compose up --build -d; Check 'docker compose up'
+
+  Wait-ForApi
+  Migrate
+  Reset-Data
+
+  Say "Ready"
+  Write-Host @"
+  Merchant pages   http://localhost:8080
+  Admin            http://localhost:8080/admin
+  Shop             $ShopUrl
+
+  Admin page key   $(EnvValue 'ADMIN_API_KEY')
+
+  At signup use domain 127.0.0.1 and tick phones, laptops and tablets.
+  Leave the webhook secret blank so one is generated.
+
+  Starting the shop now. Ctrl+C stops it; docker keeps running (.\demo.ps1 stop).
+"@
+  npm run dev --prefix demo-store
+}
+
+# The server tests use their own database on 55432, never the demo one.
+function Start-TestDb {
+  $running = docker ps --format '{{.Names}}' | Where-Object { $_ -eq $TestDbContainer }
+  if (-not $running) {
+    try { docker rm -f $TestDbContainer 2>$null | Out-Null } catch {}
+    docker run -d --name $TestDbContainer -e POSTGRES_PASSWORD=test -e POSTGRES_DB=insurance_test -p 55432:5432 postgres:16 | Out-Null
+    Check 'starting the test database'
+  }
+  for ($i = 0; $i -lt 30; $i++) {
+    try { docker exec $TestDbContainer pg_isready -U postgres -d insurance_test 2>$null | Out-Null } catch {}
+    if ($LASTEXITCODE -eq 0) { return }
+    Start-Sleep -Seconds 1
+  }
+  Die "The test database did not start."
+}
+
+function Test-All {
+  Install-Deps
+
+  Say "Starting the test database (55432) and redis (6379)"
+  Start-TestDb
+  docker compose up -d redis; Check 'starting redis'
+
+  Say "Server tests";      npm test --prefix server; Check 'server tests'
+  Say "Widget tests";      npm test --prefix widget; Check 'widget tests'
+  Say "Web tests";         npm test --prefix web; Check 'web tests'
+  Say "End-to-end test";   npm run test:e2e; Check 'end-to-end test'
+
+  Say "All tests passed"
+}
+
+function Stop-Demo {
+  Say "Stopping"
+  docker compose down; Check 'docker compose down'
+  try { docker rm -f $TestDbContainer 2>$null | Out-Null } catch {}
+}
+
+switch ($Command) {
+  'start' { Start-Demo }
+  'reset' { Check-Env; Reset-Data }
+  'test'  { Test-All }
+  'stop'  { Stop-Demo }
+  default { Die "Usage: .\demo.ps1 [start|reset|test|stop]" }
+}
