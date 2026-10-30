@@ -5,7 +5,7 @@
 #   ./demo.sh start    build and start docker, migrate, reset the demo data, run the shop
 #   ./demo.sh reset    wipe the demo data and the shop's orders, then seed again
 #   ./demo.sh test     every test suite: server, widget, web and end-to-end
-#   ./demo.sh stop     stop docker and the test database
+#   ./demo.sh stop     stop docker and the test database and redis
 #
 # Needs docker, node and npm. Reads the database login from server/.env.
 
@@ -18,6 +18,8 @@ ENV_FILE="server/.env"
 SHOP_URL="http://127.0.0.1:4174"
 API_HEALTH="http://localhost:3000/health"
 TEST_DB_CONTAINER="insureongo-test-db"
+TEST_REDIS_CONTAINER="insureongo-test-redis"
+TEST_REDIS_PORT=56379
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
@@ -134,12 +136,21 @@ start_test_db() {
   die "The test database did not start."
 }
 
+# Its own Redis too, on a port nothing else is likely to hold.
+start_test_redis() {
+  if ! docker ps --format '{{.Names}}' | grep -qx "$TEST_REDIS_CONTAINER"; then
+    docker rm -f "$TEST_REDIS_CONTAINER" >/dev/null 2>&1 || true
+    docker run -d --name "$TEST_REDIS_CONTAINER" -p "$TEST_REDIS_PORT:6379" redis:7 >/dev/null
+  fi
+}
+
 cmd_test() {
   install_deps
 
-  say "Starting the test database (55432) and redis (6379)"
+  say "Starting the test database (55432) and redis ($TEST_REDIS_PORT)"
   start_test_db
-  docker compose up -d redis
+  start_test_redis
+  export REDIS_URL="redis://127.0.0.1:$TEST_REDIS_PORT"
 
   say "Server tests"
   npm test --prefix server
@@ -156,7 +167,7 @@ cmd_test() {
 cmd_stop() {
   say "Stopping"
   docker compose down
-  docker rm -f "$TEST_DB_CONTAINER" >/dev/null 2>&1 || true
+  docker rm -f "$TEST_DB_CONTAINER" "$TEST_REDIS_CONTAINER" >/dev/null 2>&1 || true
 }
 
 case "${1:-start}" in

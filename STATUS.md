@@ -25,7 +25,7 @@ Four separate packages, no workspaces. Install in each one.
 ```bash
 docker compose up                       # api, web, postgres, redis
 
-npm test --prefix server                # needs postgres on 55432 and redis on 6379
+npm test --prefix server                # needs postgres on 55432 and redis (REDIS_URL, default 6379)
 npm test --prefix widget                # no services needed
 npm test --prefix web                   # no services needed
 npm run test:e2e                        # starts its own api and fixture server

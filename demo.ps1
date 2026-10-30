@@ -4,7 +4,7 @@
 #   .\demo.ps1 start    build and start docker, migrate, reset the demo data, run the shop
 #   .\demo.ps1 reset    wipe the demo data and the shop's orders, then seed again
 #   .\demo.ps1 test     every test suite: server, widget, web and end-to-end
-#   .\demo.ps1 stop     stop docker and the test database
+#   .\demo.ps1 stop     stop docker and the test database and redis
 #
 # Needs Docker Desktop (running), Node and npm. Fills in anything server\.env is missing.
 # If Windows refuses to run it: powershell -ExecutionPolicy Bypass -File .\demo.ps1
@@ -18,6 +18,8 @@ $EnvFile = Join-Path $PSScriptRoot 'server\.env'
 $ShopUrl = 'http://127.0.0.1:4174'
 $ApiHealth = 'http://localhost:3000/health'
 $TestDbContainer = 'insureongo-test-db'
+$TestRedisContainer = 'insureongo-test-redis'
+$TestRedisPort = 56379
 
 function Say($text) { Write-Host "`n==> $text" -ForegroundColor Cyan }
 function Die($text) { Write-Host $text -ForegroundColor Red; exit 1 }
@@ -180,12 +182,23 @@ function Start-TestDb {
   Die "The test database did not start."
 }
 
+# Its own Redis too, on a port nothing else is likely to hold.
+function Start-TestRedis {
+  $running = docker ps --format '{{.Names}}' | Where-Object { $_ -eq $TestRedisContainer }
+  if (-not $running) {
+    try { docker rm -f $TestRedisContainer 2>$null | Out-Null } catch {}
+    docker run -d --name $TestRedisContainer -p "${TestRedisPort}:6379" redis:7 | Out-Null
+    Check 'starting the test redis'
+  }
+}
+
 function Test-All {
   Install-Deps
 
-  Say "Starting the test database (55432) and redis (6379)"
+  Say "Starting the test database (55432) and redis ($TestRedisPort)"
   Start-TestDb
-  docker compose up -d redis; Check 'starting redis'
+  Start-TestRedis
+  $env:REDIS_URL = "redis://127.0.0.1:$TestRedisPort"
 
   Say "Server tests";      npm test --prefix server; Check 'server tests'
   Say "Widget tests";      npm test --prefix widget; Check 'widget tests'
@@ -198,7 +211,7 @@ function Test-All {
 function Stop-Demo {
   Say "Stopping"
   docker compose down; Check 'docker compose down'
-  try { docker rm -f $TestDbContainer 2>$null | Out-Null } catch {}
+  try { docker rm -f $TestDbContainer $TestRedisContainer 2>$null | Out-Null } catch {}
 }
 
 switch ($Command) {
