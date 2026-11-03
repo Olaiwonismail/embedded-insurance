@@ -547,6 +547,7 @@ textarea[aria-invalid='true'] {
 .admin__body {
   padding: 1.5rem clamp(1rem, 3vw, 2rem);
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1.5rem;
   align-items: start;
 }
@@ -659,6 +660,43 @@ textarea[aria-invalid='true'] {
 
 .row-link:hover {
   text-decoration: underline;
+}
+
+a.row-link {
+  text-decoration: none;
+}
+
+.stores tbody tr:has(.row-link) {
+  cursor: pointer;
+}
+
+/* ---------- Admin: one store's page ---------- */
+
+.back-link {
+  color: var(--ink-soft);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.back-link:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.page-alert {
+  margin: 1.5rem clamp(1rem, 3vw, 2rem) 0;
+}
+
+/* Breathing room between the totals, the per-store table and the bill button. */
+.panel .totals + .table-wrap {
+  margin-top: 1.5rem;
+}
+
+.panel > .admin__bar-actions {
+  margin-top: 1.25rem;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .domains {
@@ -926,6 +964,8 @@ textarea[aria-invalid='true'] {
 
 .dash__main {
   display: grid;
+  /* minmax(0, …) so a wide table scrolls inside its panel instead of widening the page. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 1.5rem;
   min-width: 0;
 }
@@ -955,6 +995,10 @@ textarea[aria-invalid='true'] {
 
 .dash__side .facts {
   margin: 1.5rem 0 0;
+}
+
+.dash__side .facts + .detail__actions {
+  margin-top: 1.5rem;
 }
 
 /* Sales figures: one row, divided, with commission as the figure that matters. */

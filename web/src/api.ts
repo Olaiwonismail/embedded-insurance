@@ -220,3 +220,8 @@ export function getMerchant(): Promise<{ store: MerchantStore }> {
 export function getActivity(): Promise<Activity> {
   return call('/v1/merchant/activity');
 }
+
+// The same activity a merchant sees on their dashboard, for any store.
+export function getStoreActivity(key: string, id: number): Promise<Activity> {
+  return call(`/v1/admin/stores/${id}/activity`, admin(key));
+}

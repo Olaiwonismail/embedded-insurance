@@ -8,6 +8,7 @@ import { requireAdmin } from '../middleware/adminAuth';
 import { EmailSender } from '../lib/email';
 import { lagosDate, previousWeekBoundary } from '../lib/lagos';
 import { runWeeklySettlement } from '../lib/settlement/weekly';
+import { getStoreActivity } from '../lib/storeActivity';
 
 const MAX_INT = 2_147_483_647;
 
@@ -137,6 +138,27 @@ export function createAdminStoresRouter(db: Db, sender: EmailSender): Router {
       next(err);
     }
   });
+
+  // The same sales, policies, bills and events the merchant sees on their dashboard.
+  router.get(
+    '/:id/activity',
+    async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
+      const id = parseStoreId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: 'Store id must be a positive whole number' });
+        return;
+      }
+      try {
+        if (!(await storeExists(id))) {
+          res.status(404).json({ error: 'Store not found' });
+          return;
+        }
+        res.json(await getStoreActivity(db, id));
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
 
   // Status changes are one conditional UPDATE, so two admins clicking at once
   // cannot both succeed from a stale state.

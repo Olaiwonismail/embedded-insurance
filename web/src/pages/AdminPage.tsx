@@ -1,50 +1,26 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import {
   AdminOverview,
   ApiError,
   BillRunResult,
-  StoreDetails,
   StoreStatus,
   StoreSummary,
-  approveStore,
   categoryLabel,
   getOverview,
-  getStore,
-  isStandardCategory,
   listStores,
   platformLabel,
   runWeeklyBill,
-  suspendStore,
 } from '../api';
+import { KeyGate, readSavedKey, saveKey } from '../components/AdminKeyGate';
 
-// Kept for this browser tab only; closing the tab forgets it.
-const KEY_STORAGE = 'insureongo.adminKey';
-
-function readSavedKey(): string {
-  try {
-    return sessionStorage.getItem(KEY_STORAGE) ?? '';
-  } catch {
-    return '';
-  }
-}
-
-function saveKey(key: string) {
-  try {
-    if (key) sessionStorage.setItem(KEY_STORAGE, key);
-    else sessionStorage.removeItem(KEY_STORAGE);
-  } catch {
-    // Storage blocked: the key still works until the page reloads.
-  }
+// Each store has its own admin page.
+export function storePath(id: number): string {
+  return `/admin/stores/${id}`;
 }
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
-const dateTimeFormat = new Intl.DateTimeFormat(undefined, {
-  dateStyle: 'medium',
-  timeStyle: 'short',
-});
-
-const STATUS_LABEL: Record<StoreStatus, string> = {
+export const STATUS_LABEL: Record<StoreStatus, string> = {
   pending: 'Pending',
   active: 'Active',
   suspended: 'Suspended',
@@ -160,7 +136,10 @@ function Overview({
                     {overview.stores.map((store) => (
                       <tr key={store.id}>
                         <th scope="row">
-                          {store.name} <StatusBadge status={store.status} />
+                          <a className="row-link" href={storePath(store.id)}>
+                            {store.name}
+                          </a>{' '}
+                          <StatusBadge status={store.status} />
                         </th>
                         <td className="num">{store.policiesSold}</td>
                         <td className="num">{amount(store.premiumTotal)}</td>
@@ -197,7 +176,7 @@ export function AdminPage() {
   const [adminKey, setAdminKey] = useState(readSavedKey);
   const [keyRejected, setKeyRejected] = useState(false);
 
-  // Stable so the list and detail panel don't refetch on every render.
+  // Stable so the list doesn't refetch on every render.
   const signOut = useCallback((rejected = false) => {
     saveKey('');
     setAdminKey('');
@@ -219,44 +198,6 @@ export function AdminPage() {
   return <MerchantList adminKey={adminKey} onSignOut={signOut} />;
 }
 
-function KeyGate({ rejected, onSubmit }: { rejected: boolean; onSubmit: (key: string) => void }) {
-  const [value, setValue] = useState('');
-
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    if (value.trim()) onSubmit(value.trim());
-  }
-
-  return (
-    <main className="gate">
-      <form className="gate__card" onSubmit={submit}>
-        <p className="brand">insureOnGo</p>
-        <h1>Merchant review</h1>
-        {rejected && (
-          <p className="alert alert--error" role="alert">
-            That admin key wasn't accepted. Check it and try again.
-          </p>
-        )}
-        <div className="field">
-          <label htmlFor="admin-key">Admin key</label>
-          <p className="field__hint">The ADMIN_API_KEY value from the server's settings.</p>
-          <input
-            id="admin-key"
-            type="password"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            autoComplete="current-password"
-            autoFocus
-          />
-        </div>
-        <button type="submit" className="btn btn--primary btn--wide">
-          Open merchant list
-        </button>
-      </form>
-    </main>
-  );
-}
-
 function MerchantList({
   adminKey,
   onSignOut,
@@ -267,7 +208,6 @@ function MerchantList({
   const [stores, setStores] = useState<StoreSummary[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
-  const [selectedId, setSelectedId] = useState<number | null>(null);
 
   // A 401 anywhere means the key is wrong or was changed on the server.
   const handleError = useCallback(
@@ -297,12 +237,6 @@ function MerchantList({
     load();
   }, [load]);
 
-  function updateRow(updated: StoreDetails) {
-    setStores((current) =>
-      current?.map((s) => (s.id === updated.id ? { ...s, status: updated.status } : s)) ?? null,
-    );
-  }
-
   const counts = {
     all: stores?.length ?? 0,
     pending: stores?.filter((s) => s.status === 'pending').length ?? 0,
@@ -326,7 +260,7 @@ function MerchantList({
         </div>
       </header>
 
-      <div className={selectedId ? 'admin__body admin__body--split' : 'admin__body'}>
+      <div className="admin__body">
         <section className="admin__list" aria-label="Stores">
           <Overview adminKey={adminKey} reloadToken={reloadToken} onError={handleError} />
 
@@ -379,23 +313,11 @@ function MerchantList({
                 </thead>
                 <tbody>
                   {visible.map((s) => (
-                    <tr
-                      key={s.id}
-                      className={s.id === selectedId ? 'is-selected' : undefined}
-                      onClick={() => setSelectedId(s.id)}
-                    >
+                    <tr key={s.id} onClick={() => window.location.assign(storePath(s.id))}>
                       <th scope="row">
-                        <button
-                          type="button"
-                          className="row-link"
-                          aria-current={s.id === selectedId ? 'true' : undefined}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedId(s.id);
-                          }}
-                        >
+                        <a className="row-link" href={storePath(s.id)}>
                           {s.name}
-                        </button>
+                        </a>
                       </th>
                       <td>{platformLabel(s.platform)}</td>
                       <td>
@@ -412,199 +334,11 @@ function MerchantList({
           )}
         </section>
 
-        {selectedId !== null && (
-          <StoreDetailPanel
-            key={selectedId}
-            adminKey={adminKey}
-            storeId={selectedId}
-            onClose={() => setSelectedId(null)}
-            onChanged={updateRow}
-            handleError={handleError}
-          />
-        )}
       </div>
     </div>
   );
 }
 
-function StatusBadge({ status }: { status: StoreStatus }) {
+export function StatusBadge({ status }: { status: StoreStatus }) {
   return <span className={`badge badge--${status}`}>{STATUS_LABEL[status] ?? status}</span>;
-}
-
-function StoreDetailPanel({
-  adminKey,
-  storeId,
-  onClose,
-  onChanged,
-  handleError,
-}: {
-  adminKey: string;
-  storeId: number;
-  onClose: () => void;
-  onChanged: (s: StoreDetails) => void;
-  handleError: (err: unknown) => string;
-}) {
-  const [store, setStore] = useState<StoreDetails | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    getStore(adminKey, storeId)
-      .then(({ store }) => !cancelled && setStore(store))
-      .catch((err) => !cancelled && setError(handleError(err)));
-    return () => {
-      cancelled = true;
-    };
-  }, [adminKey, storeId, handleError]);
-
-  async function act(action: 'approve' | 'suspend') {
-    if (!store) return;
-    const rejecting = store.status === 'pending';
-    if (
-      action === 'suspend' &&
-      !window.confirm(
-        rejecting
-          ? `Reject ${store.name}? They will not be able to take protection on any order.`
-          : `Suspend ${store.name}? Their checkout widget will stop working straight away.`,
-      )
-    ) {
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const run = action === 'approve' ? approveStore : suspendStore;
-      const { store: updated } = await run(adminKey, store.id);
-      setStore(updated);
-      onChanged(updated);
-      setNotice(
-        action === 'approve'
-          ? `${updated.name} approved.`
-          : `${updated.name} ${rejecting ? 'rejected' : 'suspended'}.`,
-      );
-    } catch (err) {
-      setError(handleError(err));
-      // Someone else may have changed it; show the current state.
-      if (err instanceof ApiError && err.status === 409) {
-        const { store: fresh } = await getStore(adminKey, store.id).catch(() => ({ store }));
-        setStore(fresh);
-        onChanged(fresh);
-      }
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <aside className="detail" aria-labelledby="detail-title">
-      <div className="detail__head">
-        <h2 id="detail-title">{store?.name ?? 'Store details'}</h2>
-        <button type="button" className="btn btn--quiet btn--small" onClick={onClose}>
-          Close
-        </button>
-      </div>
-
-      {error && (
-        <p className="alert alert--error" role="alert">
-          {error}
-        </p>
-      )}
-      {notice && (
-        <p className="alert alert--ok" role="status">
-          {notice}
-        </p>
-      )}
-
-      {!store && !error && <p className="muted">Loading…</p>}
-
-      {store && (
-        <>
-          <div className="detail__status">
-            <StatusBadge status={store.status} />
-            {store.status === 'pending' && <span>Waiting for review. The widget won't load yet.</span>}
-            {store.status === 'active' && <span>The checkout widget is live.</span>}
-            {store.status === 'suspended' && <span>The checkout widget is switched off.</span>}
-          </div>
-
-          <dl className="facts">
-            <dt>Store ID</dt>
-            <dd>{store.id}</dd>
-            <dt>Platform</dt>
-            <dd>{platformLabel(store.platform)}</dd>
-            <dt>Domains</dt>
-            <dd>
-              <ul className="plain">
-                {store.allowedDomains.map((d) => (
-                  <li key={d}>{d}</li>
-                ))}
-              </ul>
-            </dd>
-            <dt>Categories</dt>
-            <dd>
-              {store.enabledCategories.filter(isStandardCategory).map(categoryLabel).join(', ') ||
-                'None'}
-            </dd>
-            {store.enabledCategories.some((c) => !isStandardCategory(c)) && (
-              <>
-                <dt>Other products</dt>
-                <dd>
-                  {store.enabledCategories
-                    .filter((c) => !isStandardCategory(c))
-                    .map(categoryLabel)
-                    .join(', ')}
-                  <span className="badge badge--custom">Added by merchant</span>
-                  <p className="facts__note">Check a plan covers these before approving.</p>
-                </dd>
-              </>
-            )}
-            <dt>Billing email</dt>
-            <dd>
-              <a href={`mailto:${store.billingEmail}`}>{store.billingEmail}</a>
-            </dd>
-            <dt>Commission</dt>
-            <dd>{(Number(store.commissionRate) * 100).toLocaleString()}%</dd>
-            <dt>Settlement</dt>
-            <dd className="capitalize">{store.settlementFrequency}</dd>
-            <dt>Public key</dt>
-            <dd>
-              <code className="key">{store.publicKey}</code>
-            </dd>
-            <dt>Signed up</dt>
-            <dd>{dateTimeFormat.format(new Date(store.createdAt))}</dd>
-          </dl>
-
-          <div className="detail__actions">
-            {store.status === 'pending' && (
-              <button
-                type="button"
-                className="btn btn--primary"
-                disabled={busy}
-                onClick={() => act('approve')}
-              >
-                Approve store
-              </button>
-            )}
-            {store.status !== 'suspended' && (
-              <button
-                type="button"
-                className="btn btn--danger"
-                disabled={busy}
-                onClick={() => act('suspend')}
-              >
-                {/* Turning down a store that was never live is a rejection, not a
-                    suspension, though both land on the same status. */}
-                {store.status === 'pending' ? 'Reject store' : 'Suspend store'}
-              </button>
-            )}
-            {store.status === 'suspended' && (
-              <p className="muted">Suspended stores can't be reactivated from here yet.</p>
-            )}
-          </div>
-        </>
-      )}
-    </aside>
-  );
 }

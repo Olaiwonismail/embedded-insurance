@@ -242,3 +242,50 @@ describe('POST /v1/admin/stores/settlements/run', () => {
     expect(sender.sent).toHaveLength(0);
   });
 });
+
+describe('GET /v1/admin/stores/:id/activity', () => {
+  it('refuses a bad admin key', async () => {
+    const store = await insertStore();
+
+    const res = await request(app())
+      .get(`/v1/admin/stores/${store.id}/activity`)
+      .set('x-admin-key', 'nope');
+
+    expect(res.status).toBe(401);
+  });
+
+  it('answers 400 for a bad id and 404 for a store that does not exist', async () => {
+    const bad = await request(app())
+      .get('/v1/admin/stores/abc/activity')
+      .set('x-admin-key', ADMIN_KEY);
+    const missing = await request(app())
+      .get('/v1/admin/stores/999999/activity')
+      .set('x-admin-key', ADMIN_KEY);
+
+    expect(bad.status).toBe(400);
+    expect(missing.status).toBe(404);
+  });
+
+  it("shows one store's sales, policies and bills, and nothing from other stores", async () => {
+    const store = await insertStore();
+    const other = await insertStore();
+    await insertPolicy(store.id, { premium: '54000.00', commissionAmount: '5400.00' });
+    await insertPolicy(store.id, { status: 'pending' });
+    await insertPolicy(other.id, { premium: '99000.00', commissionAmount: '9900.00' });
+
+    const res = await request(app())
+      .get(`/v1/admin/stores/${store.id}/activity`)
+      .set('x-admin-key', ADMIN_KEY);
+
+    expect(res.status).toBe(200);
+    expect(res.body.sales).toEqual({
+      policiesSold: 1,
+      pendingPolicies: 1,
+      premiumTotal: '54000.00',
+      commissionTotal: '5400.00',
+    });
+    expect(res.body.recentPolicies).toHaveLength(2);
+    expect(res.body.settlements).toEqual([]);
+    expect(res.body.webhookEvents).toEqual([]);
+  });
+});
